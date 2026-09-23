@@ -1,9 +1,55 @@
 defprotocol Dumbo.Encoder do
+  @moduledoc """
+  Protocol controlling how Elixir data structures are encoded into PHP serialized format.
+
+  Any Elixir type implementing `Dumbo.Encoder` can be serialized using `Dumbo.encode/2`
+  or `Dumbo.encode_to_iodata/2`.
+
+  ## Deriving
+
+  The protocol can be derived for structs using `@derive`:
+
+      defmodule User do
+        @derive Dumbo.Encoder
+        defstruct [:name, :email]
+      end
+
+  To customize the serialized PHP class name:
+
+      defmodule User do
+        @derive {Dumbo.Encoder, class_name: "App\\\\Models\\\\User"}
+        defstruct [:name, :email]
+      end
+  """
+
+  @doc """
+  Encodes `term` into iodata following the PHP serialisation format.
+
+  ## Examples
+
+      iex> Dumbo.Encoder.encode(42, %Dumbo.EncodeOpts{})
+      ["i:", "42", ?;]
+
+      iex> Dumbo.Encoder.encode("hello", %Dumbo.EncodeOpts{})
+      ["s:", "5", ~s':"', "hello", ~s'";']
+
+  """
   @spec encode(value :: term(), opts :: Dumbo.Encode.opts()) :: iodata()
   def encode(term, opts)
 end
 
 defimpl Dumbo.Encoder, for: Any do
+  @doc """
+  Derives the `Dumbo.Encoder` protocol for a struct module.
+
+  Called automatically when using `@derive Dumbo.Encoder` or
+  `@derive {Dumbo.Encoder, options}`.
+
+  ## Options
+
+    * `:class_name` - The PHP class name to serialize the struct as.
+      Defaults to the string representation of the module name.
+  """
   defmacro __deriving__(module, _struct, opts) do
     php_name = Keyword.get(opts, :class_name, Macro.to_string(module))
 

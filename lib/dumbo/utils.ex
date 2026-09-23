@@ -1,6 +1,9 @@
 defmodule Dumbo.Utils do
   @moduledoc false
 
+  @doc """
+  Returns the byte at `position` in `source`, or raises `Dumbo.DecodeError` if out of bounds.
+  """
   def byte_at(source, position) do
     if position < byte_size(source) do
       :binary.at(source, position)
@@ -9,6 +12,11 @@ defmodule Dumbo.Utils do
     end
   end
 
+  @doc """
+  Asserts that `source` at `position` matches `flag` (a byte or binary) and returns the advanced position.
+
+  Raises `Dumbo.DecodeError` if the byte or binary does not match or exceeds the binary size.
+  """
   def flag(source, position, flag)
 
   def flag(source, position, flag) when is_integer(flag) do

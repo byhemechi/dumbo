@@ -7,7 +7,22 @@ defmodule Dumbo.MixProject do
       version: "0.1.0",
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+
+      # Docs
+      name: "Dumbo",
+      source_url: "https://github.com/byhemechi/dumbo",
+      docs: docs(),
+      package: package(),
+      description: "PHP serialisation format support for Elixir"
+    ]
+  end
+
+  defp docs do
+    [
+      main: "Dumbo",
+      logo: "elephant.svg",
+      extras: []
     ]
   end
 
@@ -18,8 +33,16 @@ defmodule Dumbo.MixProject do
     ]
   end
 
-  # Run "mix help deps" to learn about dependencies.
   defp deps do
-    []
+    [
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false, warn_if_outdated: true}
+    ]
+  end
+
+  defp package() do
+    [
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => "https://github.com/byhemechi/dumbo"}
+    ]
   end
 end

@@ -1,8 +1,13 @@
 defmodule Dumbo.DecodeError do
+  @moduledoc """
+  Exception raised when decoding a PHP serialized string fails.
+  """
+
   @type t :: %__MODULE__{position: integer, source: String.t(), token: byte() | binary()}
 
   defexception [:position, :token, :source]
 
+  @impl true
   def message(%{position: position, token: token}) when is_binary(token) do
     "unexpected sequence at position #{position}: #{inspect(token)}"
   end
@@ -26,10 +31,18 @@ defmodule Dumbo.DecodeError do
 end
 
 defmodule Dumbo.ReferenceError do
+  @moduledoc """
+  Exception raised when an invalid or unsupported reference is encountered during decoding.
+  """
+
   defexception [:message]
 end
 
 defmodule Dumbo.Decoder do
+  @moduledoc """
+  Decoder implementation for the PHP serialisation format.
+  """
+
   require Record
   import Dumbo.Utils
 
@@ -37,42 +50,44 @@ defmodule Dumbo.Decoder do
   Record.defrecord(:decode_opts, [])
 
   @doc """
-  Deserialises a value from php's serialize function
+  Deserializes a PHP serialized string into an Elixir term.
 
-    iex> Dumbo.Decoder.decode("N;")
-    nil
+  ## Examples
 
-    iex> Dumbo.Decoder.decode("b:0;")
-    false
-    iex> Dumbo.Decoder.decode("b:1;")
-    true
+      iex> Dumbo.Decoder.decode("N;")
+      nil
 
-    iex> Dumbo.Decoder.decode("i:685230;")
-    685230
-    iex> Dumbo.Decoder.decode("i:-685230;")
-    -685230
+      iex> Dumbo.Decoder.decode("b:0;")
+      false
+      iex> Dumbo.Decoder.decode("b:1;")
+      true
 
-    iex> Dumbo.Decoder.decode("d:685230.15;")
-    685230.15
-    iex> Dumbo.Decoder.decode("d:INF;")
-    :infinity
-    iex> Dumbo.Decoder.decode("d:-INF;")
-    :negative_infinity
-    iex> Dumbo.Decoder.decode("d:NAN;")
-    :nan
+      iex> Dumbo.Decoder.decode("i:685230;")
+      685230
+      iex> Dumbo.Decoder.decode("i:-685230;")
+      -685230
 
-    iex> Dumbo.Decoder.decode(~s's:6:"foobar";')
-    "foobar"
+      iex> Dumbo.Decoder.decode("d:685230.15;")
+      685230.15
+      iex> Dumbo.Decoder.decode("d:INF;")
+      :infinity
+      iex> Dumbo.Decoder.decode("d:-INF;")
+      :negative_infinity
+      iex> Dumbo.Decoder.decode("d:NAN;")
+      :nan
 
-    iex> Dumbo.Decoder.decode(~s'a:2:{i:42;b:1;s:6:"A to Z";a:3:{i:0;i:1;i:1;i:2;i:2;i:3;}}')
-    %{42 => true, "A to Z" => %{0 => 1, 1 => 2, 2 => 3}}
-    iex> Dumbo.Decoder.decode("a:0:{}")
-    %{}
+      iex> Dumbo.Decoder.decode(~s's:6:"foobar";')
+      "foobar"
 
-    iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":2:{s:4:"John";d:3.14;s:4:"Jane";d:2.718;}')
-    {:object, "stdClass", %{"John" => 3.14, "Jane" => 2.718}}
+      iex> Dumbo.Decoder.decode(~s'a:2:{i:42;b:1;s:6:"A to Z";a:3:{i:0;i:1;i:1;i:2;i:2;i:3;}}')
+      %{42 => true, "A to Z" => %{0 => 1, 1 => 2, 2 => 3}}
+      iex> Dumbo.Decoder.decode("a:0:{}")
+      %{}
+
+      iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":2:{s:4:"John";d:3.14;s:4:"Jane";d:2.718;}')
+      {:object, "stdClass", %{"John" => 3.14, "Jane" => 2.718}}
+
   """
-
   def decode(source, opts \\ decode_opts()) do
     case value(source, 0, opts) do
       {value, _pos} ->
