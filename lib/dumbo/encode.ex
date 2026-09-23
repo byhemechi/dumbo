@@ -4,7 +4,7 @@ defmodule Dumbo.EncodeOpts do
 
   ## Fields
 
-    * `:datetime_struct` - The PHP class name to use when serializing `DateTime` structs.
+    * `:datetime_struct` - The PHP class name to use when serialising `DateTime` structs.
       Defaults to `"DateTimeImmutable"`.
   """
 
@@ -14,13 +14,13 @@ end
 
 defmodule Dumbo.Encode do
   @moduledoc """
-  Low-level encoding functions for converting Elixir data types into PHP serialized iodata.
+  Low-level encoding functions for converting Elixir data types into PHP serialised iodata.
   """
 
   @type opts :: Dumbo.EncodeOpts.t()
 
   @doc """
-  Encodes an integer into PHP serialized iodata.
+  Encodes an integer into PHP serialised iodata.
 
   ## Examples
 
@@ -35,7 +35,7 @@ defmodule Dumbo.Encode do
   def integer(term, _opts), do: ["i:", :erlang.integer_to_binary(term), ?;]
 
   @doc """
-  Encodes a float into PHP serialized iodata.
+  Encodes a float into PHP serialised iodata.
 
   ## Examples
 
@@ -47,7 +47,7 @@ defmodule Dumbo.Encode do
   def float(term, _opts), do: ["d:", :erlang.float_to_binary(term), ?;]
 
   @doc """
-  Encodes a binary string into PHP serialized iodata.
+  Encodes a binary string into PHP serialised iodata.
 
   ## Examples
 
@@ -59,7 +59,7 @@ defmodule Dumbo.Encode do
   def binary(term, _opts), do: ["s:", to_string(byte_size(term)), ~s':"', term, ~s'";']
 
   @doc """
-  Encodes a map into PHP serialized iodata representing an associative array.
+  Encodes a map into PHP serialised iodata representing an associative array.
 
   ## Examples
 
@@ -84,7 +84,7 @@ defmodule Dumbo.Encode do
   end
 
   @doc """
-  Encodes an object with a PHP class name and fields into PHP serialized iodata.
+  Encodes an object with a PHP class name and fields into PHP serialised iodata.
 
   ## Examples
 
@@ -110,7 +110,7 @@ defmodule Dumbo.Encode do
   end
 
   @doc """
-  Encodes a list into PHP serialized iodata representing an indexed array.
+  Encodes a list into PHP serialised iodata representing an indexed array.
 
   ## Examples
 

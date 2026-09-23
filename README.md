@@ -21,7 +21,7 @@ end
 
 ### Encoding
 
-Use `Dumbo.encode/2` to serialize Elixir terms into a PHP serialized string:
+Use `Dumbo.encode/2` to serialise Elixir terms into a PHP serialised string:
 
 ```elixir
 # Primitives
@@ -61,7 +61,7 @@ Dumbo.encode_to_iodata("hello")
 
 ### Decoding
 
-Use `Dumbo.decode/1` to deserialize PHP serialized strings back into Elixir terms:
+Use `Dumbo.decode/1` to deserialise PHP serialised strings back into Elixir terms:
 
 ```elixir
 # Primitives
@@ -88,7 +88,7 @@ Dumbo.decode(~s'O:8:"stdClass":1:{s:4:"name";s:5:"Alice";}')
 
 ### Structs
 
-You can serialize Elixir structs into PHP objects by deriving `Dumbo.Encoder`:
+You can serialise Elixir structs into PHP objects by deriving `Dumbo.Encoder`:
 
 ```elixir
 defmodule User do
@@ -116,7 +116,7 @@ Dumbo.encode(user)
 
 ### Date and Time
 
-`DateTime` structs are automatically serialized as PHP `DateTimeImmutable` objects in UTC:
+`DateTime` structs are automatically serialised as PHP `DateTimeImmutable` objects in UTC:
 
 ```elixir
 dt = ~U[2024-01-15 09:30:00Z]

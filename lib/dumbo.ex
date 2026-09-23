@@ -1,13 +1,13 @@
 defmodule Dumbo do
   @moduledoc """
-  An encoder and decoder for the [PHP serialisation format](https://en.wikipedia.org/wiki/PHP_serialization_format).
+  An encoder and decoder for the [PHP serialisation format](https://en.wikipedia.org/wiki/PHP_serialisation_format).
 
-  Dumbo allows you to serialize Elixir data structures into PHP's serialisation format
-  and deserialize PHP serialized strings back into Elixir terms.
+  Dumbo allows you to serialise Elixir data structures into PHP's serialisation format
+  and deserialise PHP serialised strings back into Elixir terms.
   """
 
   @doc """
-  Deserializes a PHP serialized string into an Elixir term.
+  Deserialises a PHP serialised string into an Elixir term.
 
   See `decode/2` for details and options.
 
@@ -38,7 +38,7 @@ defmodule Dumbo do
   defdelegate decode(source), to: Dumbo.Decoder
 
   @doc """
-  Serializes an Elixir term into a PHP serialized binary string.
+  Serializes an Elixir term into a PHP serialised binary string.
 
   Accepts an optional `%Dumbo.EncodeOpts{}` struct to configure encoding behavior.
 
@@ -74,7 +74,7 @@ defmodule Dumbo do
   end
 
   @doc """
-  Serializes an Elixir term into iodata representing the PHP serialized format.
+  Serializes an Elixir term into iodata representing the PHP serialised format.
 
   Accepts an optional `%Dumbo.EncodeOpts{}` struct to configure encoding behavior.
 

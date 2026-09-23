@@ -1,6 +1,6 @@
 defmodule Dumbo.DecodeError do
   @moduledoc """
-  Exception raised when decoding a PHP serialized string fails.
+  Exception raised when decoding a PHP serialised string fails.
   """
 
   @type t :: %__MODULE__{position: integer, source: String.t(), token: byte() | binary()}
@@ -50,7 +50,7 @@ defmodule Dumbo.Decoder do
   Record.defrecord(:decode_opts, [])
 
   @doc """
-  Deserializes a PHP serialized string into an Elixir term.
+  Deserialises a PHP serialised string into an Elixir term.
 
   ## Examples
 

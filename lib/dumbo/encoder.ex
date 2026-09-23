@@ -1,8 +1,8 @@
 defprotocol Dumbo.Encoder do
   @moduledoc """
-  Protocol controlling how Elixir data structures are encoded into PHP serialized format.
+  Protocol controlling how Elixir data structures are encoded into PHP serialised format.
 
-  Any Elixir type implementing `Dumbo.Encoder` can be serialized using `Dumbo.encode/2`
+  Any Elixir type implementing `Dumbo.Encoder` can be serialised using `Dumbo.encode/2`
   or `Dumbo.encode_to_iodata/2`.
 
   ## Deriving
@@ -14,7 +14,7 @@ defprotocol Dumbo.Encoder do
         defstruct [:name, :email]
       end
 
-  To customize the serialized PHP class name:
+  To customize the serialised PHP class name:
 
       defmodule User do
         @derive {Dumbo.Encoder, class_name: "App\\\\Models\\\\User"}
@@ -47,7 +47,7 @@ defimpl Dumbo.Encoder, for: Any do
 
   ## Options
 
-    * `:class_name` - The PHP class name to serialize the struct as.
+    * `:class_name` - The PHP class name to serialise the struct as.
       Defaults to the string representation of the module name.
   """
   defmacro __deriving__(module, _struct, opts) do
