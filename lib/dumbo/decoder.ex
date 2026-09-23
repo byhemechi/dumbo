@@ -74,14 +74,9 @@ defmodule Dumbo.Decoder do
   """
 
   def decode(source, opts \\ decode_opts()) do
-    expected_pos = byte_size(source)
-
     case value(source, 0, opts) do
-      {value, ^expected_pos} ->
+      {value, _pos} ->
         value
-
-      {_, position} ->
-        raise Dumbo.DecodeError, source: source, position: position
     end
   end
 

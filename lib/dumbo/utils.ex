@@ -1,4 +1,6 @@
 defmodule Dumbo.Utils do
+  @moduledoc false
+
   def byte_at(source, position) do
     if position < byte_size(source) do
       :binary.at(source, position)
