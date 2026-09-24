@@ -92,7 +92,7 @@ defmodule Dumbo.Encode do
       ~s'O:8:"stdClass":1:{s:4:"prop";s:5:"value";}'
 
   """
-  @spec object(binary(), map() | keyword(), opts()) :: iodata()
+  @spec object(binary(), map() | [{term(), term()}], opts()) :: iodata()
   def object(name, fields, opts) do
     [
       "O:",
@@ -100,7 +100,7 @@ defmodule Dumbo.Encode do
       ":\"",
       name,
       "\":",
-      to_string(map_size(fields)),
+      to_string(Enum.count(fields)),
       ":{",
       for {key, value} <- fields do
         [Dumbo.Encoder.encode(key, opts), Dumbo.Encoder.encode(value, opts)]

@@ -4,18 +4,18 @@ defmodule Dumbo.DecodeOpts do
 
   ## Fields
 
-    * `:object_resolvers` - A map of PHP class names to functions that convert an
-      object's properties map into an Elixir term. Defaults to `%{}`. See
-      `Dumbo.ObjectResolver` for converting objects into structs.
+    * `:object_resolvers` - A map of PHP class names to resolvers. Each resolver is
+      a function of arity 1 or a module implementing `Dumbo.ObjectResolver`.
+      Defaults to `Dumbo.PHP.resolvers()`.
   """
 
-  @type object_resolver :: (object :: map() -> term())
+  @type object_resolver :: (object :: map() -> term()) | module()
 
   @type t :: %__MODULE__{
           object_resolvers: %{(object_name :: binary()) => object_resolver()}
         }
 
-  defstruct object_resolvers: %{}
+  defstruct object_resolvers: Dumbo.PHP.resolvers()
 end
 
 defmodule Dumbo.DecodeError do
@@ -105,9 +105,16 @@ defmodule Dumbo.Decoder do
       %{}
 
       iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":2:{s:4:"John";d:3.14;s:4:"Jane";d:2.718;}')
-      {:object, "stdClass", %{"John" => 3.14, "Jane" => 2.718}}
+      %{"John" => 3.14, "Jane" => 2.718}
 
-  Objects can be decoded with the `:object_resolvers` option:
+  Common PHP classes are resolved into native Elixir types automatically. Supply
+  an empty `:object_resolvers` map to receive raw objects instead:
+
+      iex> opts = %Dumbo.DecodeOpts{object_resolvers: %{}}
+      iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":1:{s:3:"foo";s:3:"bar";}', opts)
+      {:object, "stdClass", %{"foo" => "bar"}}
+
+  Objects can also be decoded with the `:object_resolvers` option:
 
       iex> opts = %Dumbo.DecodeOpts{object_resolvers: %{"stdClass" => fn obj -> obj end}}
       iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":1:{s:3:"foo";s:3:"bar";}', opts)
@@ -288,15 +295,42 @@ defmodule Dumbo.Decoder do
 
     {value, position} = array(source, position, opts)
 
+    {resolve_object(name, value, opts), position}
+  end
+
+  defp resolve_object(name, value, opts) do
     case Map.fetch(opts.object_resolvers, name) do
-      {:ok, resolver} when is_function(resolver, 1) ->
-        {resolver.(value), position}
+      {:ok, resolver} -> apply_resolver(name, resolver, value)
+      :error -> {:object, name, value}
+    end
+  end
 
-      {:ok, _other} ->
-        raise ArgumentError, "object resolver for #{inspect(name)} must be a function of arity 1"
+  defp apply_resolver(name, resolver, value) do
+    try do
+      cond do
+        is_function(resolver, 1) ->
+          resolver.(value)
 
-      :error ->
-        {{:object, name, value}, position}
+        is_atom(resolver) ->
+          resolve_with_module(resolver, value)
+
+        true ->
+          raise ArgumentError,
+                "object resolver for #{inspect(name)} must be a function of arity 1 " <>
+                  "or a module implementing Dumbo.ObjectResolver, got: #{inspect(resolver)}"
+      end
+    rescue
+      error in Dumbo.ResolveError ->
+        reraise %{error | class: error.class || name}, __STACKTRACE__
+    end
+  end
+
+  defp resolve_with_module(module, value) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :resolve, 1) do
+      module.resolve(value)
+    else
+      raise ArgumentError,
+            "object resolver #{inspect(module)} does not implement Dumbo.ObjectResolver"
     end
   end
 end

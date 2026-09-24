@@ -11,6 +11,9 @@ defmodule Dumbo do
 
   Accepts an optional `%Dumbo.DecodeOpts{}` struct. See `Dumbo.DecodeOpts`.
 
+  Common PHP classes are resolved into native Elixir types automatically; see
+  `Dumbo.PHP`.
+
   ## Examples
 
       iex> Dumbo.decode("i:42;")
@@ -32,6 +35,10 @@ defmodule Dumbo do
       %{0 => "foo", 1 => "bar"}
 
       iex> Dumbo.decode(~s'O:8:"stdClass":1:{s:3:"foo";s:3:"bar";}')
+      %{"foo" => "bar"}
+
+      iex> opts = %Dumbo.DecodeOpts{object_resolvers: %{}}
+      iex> Dumbo.decode(~s'O:8:"stdClass":1:{s:3:"foo";s:3:"bar";}', opts)
       {:object, "stdClass", %{"foo" => "bar"}}
 
       iex> opts = %Dumbo.DecodeOpts{object_resolvers: %{"stdClass" => fn obj -> obj end}}

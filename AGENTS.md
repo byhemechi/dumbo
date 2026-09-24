@@ -34,6 +34,11 @@ format. No umbrella, no CI, no credo/dialyzer — only `mix` tooling.
   raises `Dumbo.DecodeError`.
 - `lib/dumbo/object_resolver.ex` — behaviour for converting decoded PHP objects to
   Elixir terms.
+- `lib/dumbo/php.ex` — `Dumbo.PHP` built-in resolvers for common PHP classes with
+  direct Elixir equivalents (`stdClass`, `DateTime`/`DateTimeImmutable`,
+  `ArrayObject`/`ArrayIterator`, the `Spl*` list types), plus `Dumbo.ResolveError`.
+  They are the default `:object_resolvers` of `Dumbo.DecodeOpts`; override by
+  passing your own map. Named time zones need a configured time zone database.
 
 ## Format gotchas
 

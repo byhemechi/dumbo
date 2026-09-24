@@ -176,14 +176,15 @@ end
 defimpl Dumbo.Encoder, for: DateTime do
   def encode(date, opts) do
     date = DateTime.shift_zone!(date, "Etc/UTC")
+    date = %{date | microsecond: {elem(date.microsecond, 0), 6}}
 
     Dumbo.Encode.object(
       opts.datetime_struct,
-      %{
-        "date" => @for.to_iso8601(date),
-        "timezone_type" => 3,
-        "timezone" => "UTC"
-      },
+      [
+        {"date", Calendar.strftime(date, "%Y-%m-%d %H:%M:%S.%f")},
+        {"timezone_type", 3},
+        {"timezone", "UTC"}
+      ],
       opts
     )
   end

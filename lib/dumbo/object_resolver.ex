@@ -2,8 +2,6 @@ defmodule Dumbo.ObjectResolver do
   @moduledoc """
   Behaviour for converting a decoded PHP object into an Elixir term, typically a struct.
 
-  Modules implementing this behaviour can be used with `resolver/1`:
-
       defmodule User do
         @behaviour Dumbo.ObjectResolver
 
@@ -16,7 +14,7 @@ defmodule Dumbo.ObjectResolver do
       end
 
       opts = %Dumbo.DecodeOpts{
-        object_resolvers: %{"User" => Dumbo.ObjectResolver.resolver(User)}
+        object_resolvers: %{"User" => User}
       }
   """
 
@@ -26,8 +24,7 @@ defmodule Dumbo.ObjectResolver do
   @callback resolve(object :: map()) :: term()
 
   @doc """
-  Returns a resolver function for `module`, suitable for the `:object_resolvers`
-  option of `Dumbo.DecodeOpts`.
+  Returns a resolver function for `module`.
   """
   @spec resolver(module()) :: (object :: map() -> term())
   def resolver(module) when is_atom(module) do

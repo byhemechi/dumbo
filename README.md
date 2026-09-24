@@ -83,11 +83,22 @@ Dumbo.decode(~s'a:2:{i:0;s:3:"foo";i:1;s:3:"bar";}')
 
 # Objects
 Dumbo.decode(~s'O:8:"stdClass":1:{s:4:"name";s:5:"Alice";}')
+#=> %{"name" => "Alice"}
+```
+
+Common PHP classes are resolved into native Elixir types automatically (see
+[Built-in resolvers](#built-in-resolvers)). Supply an empty `:object_resolvers`
+map to receive raw `{:object, class_name, properties}` tuples instead:
+
+```elixir
+opts = %Dumbo.DecodeOpts{object_resolvers: %{}}
+
+Dumbo.decode(~s'O:8:"stdClass":1:{s:4:"name";s:5:"Alice";}', opts)
 #=> {:object, "stdClass", %{"name" => "Alice"}}
 ```
 
-By default decodes PHP objects into `{:object, class_name, properties}` tuples. Use the
-`:object_resolvers` option to convert matching objects into Elixir terms:
+Use the `:object_resolvers` option to supply your own resolvers. A resolver is
+either a function of arity 1 or a module implementing `Dumbo.ObjectResolver`:
 
 ```elixir
 opts = %Dumbo.DecodeOpts{
@@ -97,7 +108,47 @@ opts = %Dumbo.DecodeOpts{
 }
 
 Dumbo.decode(~s'O:8:"stdClass":1:{s:4:"name";s:5:"Alice";}', opts)
-#=> %{"name" => "Alice"}
+#=> %{"name" => "Alice"} (handled by the explicit resolver, not the built-in one)
+```
+
+### Built-in resolvers
+
+Dumbo ships with resolvers for common PHP classes that map directly onto native
+Elixir types:
+
+| PHP class             | Elixir term |
+| --------------------- | ----------- |
+| `stdClass`            | map         |
+| `DateTime`            | `DateTime`  |
+| `DateTimeImmutable`   | `DateTime`  |
+| `ArrayObject`         | map         |
+| `ArrayIterator`       | map         |
+| `SplFixedArray`       | list        |
+| `SplDoublyLinkedList` | list        |
+| `SplStack`            | list        |
+| `SplQueue`            | list        |
+
+They are the default `:object_resolvers` of `%Dumbo.DecodeOpts{}`, so they apply
+automatically. `Dumbo.PHP.resolvers/0` returns the map, and each mapping is also
+exposed as a public function (for example `Dumbo.PHP.resolve_datetime/1`), so you
+can extend or override the defaults:
+
+```elixir
+resolvers = Map.put(Dumbo.PHP.resolvers(), "Money", &App.Money.resolve/1)
+opts = %Dumbo.DecodeOpts{object_resolvers: resolvers}
+
+Dumbo.decode(~s'O:13:"SplFixedArray":3:{i:0;i:1;i:1;i:2;i:2;i:3;}', opts)
+#=> [1, 2, 3]
+```
+
+`DateTime` values are resolved from PHP's native representation. Fixed-offset and
+UTC time zones resolve out of the box; other identifiers need a configured time
+zone database (for example [`tzdata`](https://hex.pm/packages/tzdata)) and raise
+`Dumbo.ResolveError` otherwise:
+
+```elixir
+Dumbo.decode(~s'O:17:"DateTimeImmutable":3:{s:4:"date";s:26:"2024-01-15 09:30:00.000000";s:13:"timezone_type";i:3;s:8:"timezone";s:3:"UTC";}')
+#=> ~U[2024-01-15 09:30:00.000000Z]
 ```
 
 ### Structs
@@ -138,7 +189,7 @@ defmodule User do
 end
 
 opts = %Dumbo.DecodeOpts{
-  object_resolvers: %{"User" => Dumbo.ObjectResolver.resolver(User)}
+  object_resolvers: %{"User" => User}
 }
 
 Dumbo.decode(~s'O:4:"User":2:{s:4:"name";s:5:"Alice";s:5:"email";s:17:"alice@example.com";}', opts)
@@ -147,17 +198,18 @@ Dumbo.decode(~s'O:4:"User":2:{s:4:"name";s:5:"Alice";s:5:"email";s:17:"alice@exa
 
 ### Date and Time
 
-`DateTime` structs are automatically serialised as PHP `DateTimeImmutable` objects in UTC:
+`DateTime` structs are automatically serialised as PHP `DateTimeImmutable` objects in
+UTC, using PHP's native representation:
 
 ```elixir
 dt = ~U[2024-01-15 09:30:00Z]
 Dumbo.encode(dt)
-#=> ~s'O:17:"DateTimeImmutable":3:{s:4:"date";s:20:"2024-01-15T09:30:00Z";s:8:"timezone";s:3:"UTC";s:13:"timezone_type";i:3;}'
+#=> ~s'O:17:"DateTimeImmutable":3:{s:4:"date";s:26:"2024-01-15 09:30:00.000000";s:13:"timezone_type";i:3;s:8:"timezone";s:3:"UTC";}'
 ```
 
 You can specify a different PHP class (such as `"DateTime"`) using `Dumbo.EncodeOpts`:
 
 ```elixir
 Dumbo.encode(dt, %Dumbo.EncodeOpts{datetime_struct: "DateTime"})
-#=> ~s'O:8:"DateTime":3:{s:4:"date";s:20:"2024-01-15T09:30:00Z";s:8:"timezone";s:3:"UTC";s:13:"timezone_type";i:3;}'
+#=> ~s'O:8:"DateTime":3:{s:4:"date";s:26:"2024-01-15 09:30:00.000000";s:13:"timezone_type";i:3;s:8:"timezone";s:3:"UTC";}'
 ```
