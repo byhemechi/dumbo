@@ -1,3 +1,23 @@
+defmodule Dumbo.DecodeOpts do
+  @moduledoc """
+  Options for configuring decoding behavior.
+
+  ## Fields
+
+    * `:object_resolvers` - A map of PHP class names to functions that convert an
+      object's properties map into an Elixir term. Defaults to `%{}`. See
+      `Dumbo.ObjectResolver` for converting objects into structs.
+  """
+
+  @type object_resolver :: (object :: map() -> term())
+
+  @type t :: %__MODULE__{
+          object_resolvers: %{(object_name :: binary()) => object_resolver()}
+        }
+
+  defstruct object_resolvers: %{}
+end
+
 defmodule Dumbo.DecodeError do
   @moduledoc """
   Exception raised when decoding a PHP serialised string fails.
@@ -43,14 +63,14 @@ defmodule Dumbo.Decoder do
   Decoder implementation for the PHP serialisation format.
   """
 
-  require Record
   import Dumbo.Utils
 
-  @type decode_opts :: record(:decode_opts, [])
-  Record.defrecord(:decode_opts, [])
+  @type opts :: Dumbo.DecodeOpts.t()
 
   @doc """
   Deserialises a PHP serialised string into an Elixir term.
+
+  Accepts an optional `%Dumbo.DecodeOpts{}` struct. See `Dumbo.DecodeOpts`.
 
   ## Examples
 
@@ -87,8 +107,14 @@ defmodule Dumbo.Decoder do
       iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":2:{s:4:"John";d:3.14;s:4:"Jane";d:2.718;}')
       {:object, "stdClass", %{"John" => 3.14, "Jane" => 2.718}}
 
+  Objects can be decoded with the `:object_resolvers` option:
+
+      iex> opts = %Dumbo.DecodeOpts{object_resolvers: %{"stdClass" => fn obj -> obj end}}
+      iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":1:{s:3:"foo";s:3:"bar";}', opts)
+      %{"foo" => "bar"}
+
   """
-  def decode(source, opts \\ decode_opts()) do
+  def decode(source, opts \\ %Dumbo.DecodeOpts{}) do
     case value(source, 0, opts) do
       {value, _pos} ->
         value
@@ -262,6 +288,15 @@ defmodule Dumbo.Decoder do
 
     {value, position} = array(source, position, opts)
 
-    {{:object, name, value}, position}
+    case Map.fetch(opts.object_resolvers, name) do
+      {:ok, resolver} when is_function(resolver, 1) ->
+        {resolver.(value), position}
+
+      {:ok, _other} ->
+        raise ArgumentError, "object resolver for #{inspect(name)} must be a function of arity 1"
+
+      :error ->
+        {{:object, name, value}, position}
+    end
   end
 end

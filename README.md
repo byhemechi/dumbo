@@ -86,6 +86,20 @@ Dumbo.decode(~s'O:8:"stdClass":1:{s:4:"name";s:5:"Alice";}')
 #=> {:object, "stdClass", %{"name" => "Alice"}}
 ```
 
+By default decodes PHP objects into `{:object, class_name, properties}` tuples. Use the
+`:object_resolvers` option to convert matching objects into Elixir terms:
+
+```elixir
+opts = %Dumbo.DecodeOpts{
+  object_resolvers: %{
+    "stdClass" => fn properties -> properties end
+  }
+}
+
+Dumbo.decode(~s'O:8:"stdClass":1:{s:4:"name";s:5:"Alice";}', opts)
+#=> %{"name" => "Alice"}
+```
+
 ### Structs
 
 You can serialise Elixir structs into PHP objects by deriving `Dumbo.Encoder`:
@@ -112,6 +126,23 @@ end
 user = %User{name: "Alice", email: "alice@example.com"}
 Dumbo.encode(user)
 #=> ~s'O:15:"App\\Models\\User":2:{s:4:"name";s:5:"Alice";s:5:"email";s:17:"alice@example.com";}'
+```
+
+Deriving with `object_resolver: true` additionally implements the `Dumbo.ObjectResolver`
+behaviour, so decoded PHP objects can be converted back into the struct:
+
+```elixir
+defmodule User do
+  @derive {Dumbo.Encoder, object_resolver: true}
+  defstruct [:name, :email]
+end
+
+opts = %Dumbo.DecodeOpts{
+  object_resolvers: %{"User" => Dumbo.ObjectResolver.resolver(User)}
+}
+
+Dumbo.decode(~s'O:4:"User":2:{s:4:"name";s:5:"Alice";s:5:"email";s:17:"alice@example.com";}', opts)
+#=> %User{name: "Alice", email: "alice@example.com"}
 ```
 
 ### Date and Time

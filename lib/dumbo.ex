@@ -9,7 +9,7 @@ defmodule Dumbo do
   @doc """
   Deserialises a PHP serialised string into an Elixir term.
 
-  See `decode/2` for details and options.
+  Accepts an optional `%Dumbo.DecodeOpts{}` struct. See `Dumbo.DecodeOpts`.
 
   ## Examples
 
@@ -34,8 +34,15 @@ defmodule Dumbo do
       iex> Dumbo.decode(~s'O:8:"stdClass":1:{s:3:"foo";s:3:"bar";}')
       {:object, "stdClass", %{"foo" => "bar"}}
 
+      iex> opts = %Dumbo.DecodeOpts{object_resolvers: %{"stdClass" => fn obj -> obj end}}
+      iex> Dumbo.decode(~s'O:8:"stdClass":1:{s:3:"foo";s:3:"bar";}', opts)
+      %{"foo" => "bar"}
+
   """
-  defdelegate decode(source), to: Dumbo.Decoder
+  @spec decode(source :: binary(), opts :: Dumbo.DecodeOpts.t()) :: term()
+  def decode(source, opts \\ %Dumbo.DecodeOpts{}) do
+    Dumbo.Decoder.decode(source, opts)
+  end
 
   @doc """
   Serializes an Elixir term into a PHP serialised binary string.

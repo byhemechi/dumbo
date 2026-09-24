@@ -20,6 +20,17 @@ defprotocol Dumbo.Encoder do
         @derive {Dumbo.Encoder, class_name: "App\\\\Models\\\\User"}
         defstruct [:name, :email]
       end
+
+  To additionally implement the `Dumbo.ObjectResolver` behaviour:
+
+      defmodule User do
+        @derive {Dumbo.Encoder, object_resolver: true}
+        defstruct [:name, :email]
+      end
+
+      opts = %Dumbo.DecodeOpts{
+        object_resolvers: %{"User" => Dumbo.ObjectResolver.resolver(User)}
+      }
   """
 
   @doc """
@@ -49,9 +60,13 @@ defimpl Dumbo.Encoder, for: Any do
 
     * `:class_name` - The PHP class name to serialise the struct as.
       Defaults to the string representation of the module name.
+
+    * `:object_resolver` - When `true`, also implements `Dumbo.ObjectResolver`.
+      Defaults to `false`.
   """
   defmacro __deriving__(module, _struct, opts) do
     php_name = Keyword.get(opts, :class_name, Macro.to_string(module))
+    object_resolver? = Keyword.get(opts, :object_resolver, false)
 
     fields =
       for %{field: field_name} <- Macro.struct_info!(module, __CALLER__) do
@@ -60,6 +75,7 @@ defimpl Dumbo.Encoder, for: Any do
 
     term_var = Macro.var(:term, nil)
     opts_var = Macro.var(:opts, nil)
+    object_var = Macro.var(:object, nil)
 
     struct_label = [
       "O:#{byte_size(php_name)}:\"#{php_name}\":#{length(fields)}:{",
@@ -74,12 +90,35 @@ defimpl Dumbo.Encoder, for: Any do
       ?}
     ]
 
+    resolver =
+      if object_resolver? do
+        mapping = Macro.escape(Map.new(fields))
+
+        quote do
+          @behaviour Dumbo.ObjectResolver
+
+          @impl Dumbo.ObjectResolver
+          def resolve(unquote(object_var)) do
+            mapping = unquote(mapping)
+
+            fields =
+              unquote(object_var)
+              |> Map.take(Map.keys(mapping))
+              |> Map.new(fn {name, value} -> {Map.fetch!(mapping, name), value} end)
+
+            struct!(__MODULE__, fields)
+          end
+        end
+      end
+
     quote do
       defimpl Dumbo.Encoder, for: unquote(module) do
         def encode(unquote(term_var), unquote(opts_var)) do
           unquote(struct_label)
         end
       end
+
+      unquote(resolver)
     end
   end
 
