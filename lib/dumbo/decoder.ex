@@ -129,6 +129,10 @@ defmodule Dumbo.Decoder do
   end
 
   defp value(source, position, opts) do
+    if byte_size(source) < position + 2 do
+      raise Dumbo.DecodeError, source: source, position: position
+    end
+
     case :binary.part(source, position, 2) do
       "N;" -> {nil, position + 2}
       "b:" -> boolean(source, position + 2)
