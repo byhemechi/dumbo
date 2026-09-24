@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Single-package Elixir library (`:dumbo`) that encodes/decodes the PHP serialization
-format. No umbrella, no CI, no credo/dialyzer — only `mix` tooling.
+format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
+(`.github/workflows/ci.yml`) runs formatting and tests on a small Elixir/OTP matrix.
 
 ## Commands
 
