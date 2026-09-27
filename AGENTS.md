@@ -19,6 +19,11 @@ format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
   correct and formatted, and add new behavior docs there.
 - Modules under `test/support/` are only compiled in `:test` (see
   `elixirc_paths/1` in `mix.exs`). Put test-only structs there, not in `lib`.
+- `test/fixtures/` holds PHP-serialised sample payloads (`realistic/`, plus
+  `synthetic/best|worst/` at `small`/`medium`/`large`). Load them with
+  `DumboTest.Fixtures`; `test/fixtures_test.exs` asserts every fixture decodes
+  and that `decode(encode(decode(bin)))` returns an equal term. All sizes run by
+  default.
 
 ## Architecture
 
@@ -47,8 +52,10 @@ format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
   `byte_size/1` everywhere (strings, object names).
 - Decoded PHP objects default to `{:object, name, properties_map}` unless an
   `:object_resolvers` entry matches.
-- Float encoding uses `:erlang.float_to_binary/1`, which does not match PHP's
-  precision (see the `d:3.14000000000000012434e+00;` doctest) — don't "fix" the
-  doctest to a rounded value.
+- Float encoding matches PHP's `serialize()` with the default
+  `serialize_precision = -1`: shortest round-trip digits, no trailing `.0` for
+  integral floats, and scientific notation with a signed uppercase `E` (e.g.
+  `d:1.0E+25;`) only when the decimal exponent falls outside `-4..16`. See
+  `Dumbo.Encode.float/2`; the fixture round-trips depend on this.
 - `R:` array references are only resolved within arrays; recursive refs
   (`R:1;` at the top level) raise `Dumbo.ReferenceError`.

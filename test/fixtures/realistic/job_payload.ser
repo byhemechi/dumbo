@@ -1,0 +1,1 @@
+a:8:{s:4:"uuid";s:36:"59ffff98-f4b3-4c92-4589-841520b23df4";s:12:"display_name";s:20:"App\Jobs\SendInvoice";s:3:"job";s:20:"App\Jobs\SendInvoice";s:9:"max_tries";i:3;s:8:"attempts";i:0;s:7:"backoff";a:3:{i:0;i:5;i:1;i:15;i:2;i:60;}s:10:"created_at";s:25:"2024-10-10T09:03:57+00:00";s:7:"payload";a:2:{s:10:"invoice_id";i:42;s:5:"email";s:15:"ada@example.com";}}

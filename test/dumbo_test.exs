@@ -140,6 +140,67 @@ defmodule DumboTest do
     end
   end
 
+  describe "float decoding" do
+    test "accepts exponent notation emitted by PHP and Erlang" do
+      assert Dumbo.decode("d:1.0E+25;") == 1.0e25
+      assert Dumbo.decode("d:1.5e+00;") == 1.5
+      assert Dumbo.decode("d:1e3;") == 1.0e3
+      assert Dumbo.decode("d:-1.0e-3;") == -0.001
+    end
+
+    test "accepts floats with a missing leading or trailing digit" do
+      assert Dumbo.decode("d:.5;") == 0.5
+      assert Dumbo.decode("d:1.;") == 1.0
+      assert Dumbo.decode("d:-.5;") == -0.5
+    end
+
+    test "raises for malformed floats" do
+      for source <- ["d:1e;", "d:1.2.3;", "d:e3;", "d:;"] do
+        assert_raise Dumbo.DecodeError, fn -> Dumbo.decode(source) end
+      end
+    end
+  end
+
+  describe "float encoding" do
+    test "matches PHP's serialize() formatting" do
+      cases = [
+        {0.0, "d:0;"},
+        {-0.0, "d:-0;"},
+        {1.0, "d:1;"},
+        {-1.0, "d:-1;"},
+        {1.5, "d:1.5;"},
+        {3.14, "d:3.14;"},
+        {0.1, "d:0.1;"},
+        {0.1 + 0.2, "d:0.30000000000000004;"},
+        {19.99, "d:19.99;"},
+        {0.14285714285714285, "d:0.14285714285714285;"},
+        {100_000.0, "d:100000;"},
+        {0.0001, "d:0.0001;"},
+        {1.0e-5, "d:1.0E-5;"},
+        {-1.0e-25, "d:-1.0E-25;"},
+        {1.0e16, "d:10000000000000000;"},
+        {9.999999999999999e16, "d:99999999999999980;"},
+        {1.0e17, "d:1.0E+17;"},
+        {123_456_789_012_345_678.0, "d:1.2345678901234568E+17;"},
+        {1.2345e20, "d:1.2345E+20;"},
+        {1.0e25, "d:1.0E+25;"},
+        {1.0e100, "d:1.0E+100;"},
+        {1.7976931348623157e308, "d:1.7976931348623157E+308;"},
+        {5.0e-324, "d:5.0E-324;"}
+      ]
+
+      for {value, expected} <- cases do
+        assert Dumbo.encode(value) == expected
+      end
+    end
+
+    test "round-trips floats through the decoder" do
+      for value <- [0.0, -0.0, 1.5, 3.14, 0.14285714285714285, 1.0e-5, 1.0e17, -1.0e-25] do
+        assert value |> Dumbo.encode() |> Dumbo.decode() == value
+      end
+    end
+  end
+
   describe "DateTime encoding" do
     test "matches PHP's native serialisation shape" do
       assert Dumbo.encode(~U[2024-01-15 09:30:00Z]) ==

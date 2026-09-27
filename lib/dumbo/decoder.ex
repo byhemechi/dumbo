@@ -89,6 +89,12 @@ defmodule Dumbo.Decoder do
 
       iex> Dumbo.Decoder.decode("d:685230.15;")
       685230.15
+      iex> Dumbo.Decoder.decode("d:.5;")
+      0.5
+      iex> Dumbo.Decoder.decode("d:1e3;")
+      1.0e3
+      iex> Dumbo.Decoder.decode("d:1.0E+25;")
+      1.0e25
       iex> Dumbo.Decoder.decode("d:INF;")
       :infinity
       iex> Dumbo.Decoder.decode("d:-INF;")
@@ -177,58 +183,76 @@ defmodule Dumbo.Decoder do
     end
   end
 
-  defp float(source, position, count \\ 0, is_negative \\ false, fraction_part \\ false) do
-    case :binary.at(source, position + count) do
-      ?- when count == 0 ->
-        float(source, position, 1, true, fraction_part)
+  defp float(source, position) do
+    cond do
+      matches?(source, position, "INF;") -> {:infinity, position + 4}
+      matches?(source, position, "-INF;") -> {:negative_infinity, position + 5}
+      matches?(source, position, "NAN;") -> {:nan, position + 4}
+      true -> numeric_float(source, position)
+    end
+  end
 
-      ?I when count == 0 ->
-        {:infinity, flag(source, position, "INF;")}
+  defp numeric_float(source, position) do
+    token = float_token(source, position, 0)
 
-      ?I when count == 1 and is_negative == true ->
-        {:negative_infinity, flag(source, position, "-INF;")}
+    value =
+      case normalize_float(token) do
+        {:ok, normalized} ->
+          :erlang.binary_to_float(normalized)
 
-      ?N when count == 0 ->
-        {:nan, flag(source, position, "NAN;")}
+        :error ->
+          raise Dumbo.DecodeError, source: source, position: position
+      end
 
-      ?. when fraction_part == false ->
-        float(source, position, count + 1, is_negative, true)
+    {value, position + byte_size(token) + 1}
+  end
 
-      c when is_digit(c) ->
-        float(source, position, count + 1, is_negative, fraction_part)
-
-      ?; when count > 0 and fraction_part == false ->
-        v =
-          source
-          |> :binary.part(position, count)
-          |> :erlang.binary_to_integer()
-          |> :erlang.float()
-
-        {v, position + count + 1}
-
+  defp float_token(source, position, count) do
+    case byte_at(source, position + count) do
       ?; when count > 0 ->
-        prefix = if(:binary.at(source, position) == ?., do: "0", else: "")
+        :binary.part(source, position, count)
 
-        suffix =
-          cond do
-            !fraction_part -> ".0"
-            :binary.at(source, position + count - 1) == ?. -> "0"
-            true -> ""
-          end
-
-        v =
-          if prefix == "" and suffix == "" do
-            :binary.part(source, position, count)
-          else
-            <<prefix::binary, :binary.part(source, position, count)::binary, suffix::binary>>
-          end
-          |> :erlang.binary_to_float()
-
-        {v, position + count + 1}
+      c when c in ~c"0123456789+-.eE" ->
+        float_token(source, position, count + 1)
 
       _ ->
-        raise(Dumbo.DecodeError, source: source, position: position + count)
+        raise Dumbo.DecodeError, source: source, position: position + count
     end
+  end
+
+  @float_pattern ~r/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+
+  # PHP emits exponent notation (e.g. `1.0E+25`) and Erlang emits zero-padded
+  # exponents (e.g. `1.5e+00`); `:erlang.binary_to_float/1` requires a decimal
+  # point, so normalise the token before parsing it.
+  defp normalize_float(token) do
+    if Regex.match?(@float_pattern, token) do
+      {mantissa, exponent} =
+        case :binary.split(String.downcase(token), "e") do
+          [mantissa] -> {mantissa, ""}
+          [mantissa, exponent] -> {mantissa, "e" <> exponent}
+        end
+
+      {:ok, normalize_mantissa(mantissa) <> exponent}
+    else
+      :error
+    end
+  end
+
+  defp normalize_mantissa("-" <> rest), do: "-" <> normalize_mantissa(rest)
+
+  defp normalize_mantissa(mantissa) do
+    cond do
+      String.starts_with?(mantissa, ".") -> "0" <> mantissa
+      not String.contains?(mantissa, ".") -> mantissa <> ".0"
+      String.ends_with?(mantissa, ".") -> mantissa <> "0"
+      true -> mantissa
+    end
+  end
+
+  defp matches?(source, position, value) do
+    position + byte_size(value) <= byte_size(source) and
+      :binary.part(source, position, byte_size(value)) == value
   end
 
   defp bytes(source, position) do
