@@ -78,6 +78,37 @@ defmodule Dumbo.Decoder do
 
   @type opts :: Dumbo.DecodeOpts.t()
 
+  @compile {:inline,
+            [
+              advance: 2,
+              boolean: 2,
+              deref_object: 1,
+              dot_pattern: 0,
+              exponent_pattern: 0,
+              integer: 2,
+              key_context: 1,
+              push: 4,
+              reference_pattern: 0,
+              reserve: 1,
+              resolve_slot: 3
+            ]}
+
+  # `:binary.compile_pattern/1` returns a term containing a reference, which
+  # cannot be embedded in a function literal, so the patterns are compiled once
+  # at module load and fetched through `:persistent_term`.
+  @on_load :__compile_patterns__
+  @doc false
+  def __compile_patterns__ do
+    :persistent_term.put({__MODULE__, :reference_pattern}, :binary.compile_pattern(["R:", "r:"]))
+    :persistent_term.put({__MODULE__, :exponent_pattern}, :binary.compile_pattern(["e", "E"]))
+    :persistent_term.put({__MODULE__, :dot_pattern}, :binary.compile_pattern("."))
+    :ok
+  end
+
+  defp reference_pattern, do: :persistent_term.get({__MODULE__, :reference_pattern})
+  defp exponent_pattern, do: :persistent_term.get({__MODULE__, :exponent_pattern})
+  defp dot_pattern, do: :persistent_term.get({__MODULE__, :dot_pattern})
+
   require Record
 
   #   * `opts`     - the active `Dumbo.DecodeOpts`.
@@ -184,7 +215,7 @@ defmodule Dumbo.Decoder do
   # container. If the payload cannot contain an `R:`/`r:` token at all, skip that
   # work entirely, exactly as if `:resolve_references` had been set to `false`.
   defp disable_unused_references(source, %Dumbo.DecodeOpts{resolve_references: true} = opts) do
-    if :binary.match(source, ["R:", "r:"]) == :nomatch do
+    if :binary.match(source, reference_pattern()) == :nomatch do
       %{opts | resolve_references: false}
     else
       opts
@@ -361,39 +392,86 @@ defmodule Dumbo.Decoder do
   end
 
   defp numeric_float(rest, context(position: position) = context) do
-    {token, rest} = float_token(rest, context, position)
+    {token, rest, count} = float_token(rest, context, position, 0)
 
     case normalize_float(token) do
       {:ok, normalized} ->
         value = :erlang.binary_to_float(normalized)
-        push(value, rest, position + byte_size(token) + 1, context)
+        push(value, rest, position + count + 1, context)
 
       :error ->
-        fail(rest, context)
+        # Match the NIF: report the whole invalid token at its start.
+        raise Dumbo.DecodeError,
+          source: context(context, :source),
+          position: position,
+          token: token
     end
   end
 
-  defp float_token(rest, context(source: source, position: position) = context, start) do
+  defp float_token(rest, context(source: source) = context, start, count) do
     case rest do
       <<?;, rest::binary>> ->
-        {binary_part(source, start, position - start), rest}
+        {binary_part(source, start, count), rest, count}
 
       <<c, rest::binary>> when c in ~c"0123456789+-.eE" ->
-        float_token(rest, advance(context, 1), start)
+        float_token(rest, context, start, count + 1)
 
       _ ->
-        fail(rest, context)
+        fail(rest, advance(context, count))
     end
   end
 
-  @float_pattern ~r/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/
+  # Mirrors the token grammar accepted by the NIF's `valid_float/1`:
+  # `^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$`.
+  defp valid_float?(<<"-", rest::binary>>), do: valid_float_mantissa?(rest)
+  defp valid_float?(rest), do: valid_float_mantissa?(rest)
+
+  defp valid_float_mantissa?(<<?., rest::binary>>) do
+    case take_digits(rest, 0) do
+      {count, rest} when count > 0 -> valid_float_exponent?(rest)
+      _ -> false
+    end
+  end
+
+  defp valid_float_mantissa?(rest) do
+    case take_digits(rest, 0) do
+      {count, rest} when count > 0 ->
+        case rest do
+          <<?., rest::binary>> ->
+            {_fraction, rest} = take_digits(rest, 0)
+            valid_float_exponent?(rest)
+
+          _ ->
+            valid_float_exponent?(rest)
+        end
+
+      _ ->
+        false
+    end
+  end
+
+  defp valid_float_exponent?(<<c, rest::binary>>) when c in [?e, ?E] do
+    rest =
+      case rest do
+        <<sign, rest::binary>> when sign in [?+, ?-] -> rest
+        _ -> rest
+      end
+
+    case take_digits(rest, 0) do
+      {count, <<>>} when count > 0 -> true
+      _ -> false
+    end
+  end
+
+  defp valid_float_exponent?(<<>>), do: true
+  defp valid_float_exponent?(_), do: false
 
   # `:erlang.binary_to_float/1` requires a decimal point, but PHP and Erlang emit
   # exponent notation that may omit it.
   defp normalize_float(token) do
-    if Regex.match?(@float_pattern, token) do
+    if valid_float?(token) do
       {mantissa, exponent} =
-        case :binary.split(String.downcase(token), "e") do
+        case :binary.split(token, exponent_pattern()) do
           [mantissa] -> {mantissa, ""}
           [mantissa, exponent] -> {mantissa, "e" <> exponent}
         end
@@ -405,12 +483,12 @@ defmodule Dumbo.Decoder do
   end
 
   defp normalize_mantissa("-" <> rest), do: "-" <> normalize_mantissa(rest)
+  defp normalize_mantissa("." <> _ = mantissa), do: "0" <> mantissa
 
   defp normalize_mantissa(mantissa) do
     cond do
-      String.starts_with?(mantissa, ".") -> "0" <> mantissa
-      not String.contains?(mantissa, ".") -> mantissa <> ".0"
-      String.ends_with?(mantissa, ".") -> mantissa <> "0"
+      :binary.match(mantissa, dot_pattern()) == :nomatch -> mantissa <> ".0"
+      :binary.last(mantissa) == ?. -> mantissa <> "0"
       true -> mantissa
     end
   end
