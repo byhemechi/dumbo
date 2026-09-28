@@ -38,10 +38,9 @@ format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
   runtime; there is no fallback impl.
 - `lib/dumbo/encode.ex` — low-level iodata builders. Everything returns iodata;
   only `Dumbo.encode/2` calls `IO.iodata_to_binary/1`.
-- `lib/dumbo/decoder.ex` — recursive-descent parser tracking byte positions in the
-  source binary. `Dumbo.Utils` provides `byte_at/2` and `flag/3` bounds-checked
-  byte assertions — use them instead of raw `:binary.at/2` so malformed input still
-  raises `Dumbo.DecodeError`.
+- `lib/dumbo/decoder.ex` — recursive-descent parser threading `rest`, `position`
+  and a decode `context` through its functions. `Dumbo.Utils.chain/3` is a
+  combinator macro for writing parser sequences inline.
 - `lib/dumbo/object_resolver.ex` — behaviour for converting decoded PHP objects to
   Elixir terms.
 - `lib/dumbo/php.ex` — `Dumbo.PHP` built-in resolvers for common PHP classes with

@@ -68,16 +68,20 @@ defmodule Dumbo.ReferenceError do
   (`r:`), or recursive. PHP allows cyclic data; Elixir terms cannot.
   """
 
-  defexception [:message]
+  @type t :: %__MODULE__{message: String.t(), position: integer()}
+
+  defexception [:message, :position]
+
+  @impl true
+  def message(%{message: message, position: position}) do
+    "#{message} at position #{position}"
+  end
 end
 
 defmodule Dumbo.UnsupportedOperatorError do
   @moduledoc """
-  Raised when the payload uses a PHP serialisation operator that Dumbo does not
-  support.
-
-  The format defines operators beyond the ones this library decodes, such as
-  `C:` (objects implementing `Serializable`) and `E:` (enums).
+  Raised for PHP serialisation operators Dumbo does not support, such as `C:`
+  (objects implementing `Serializable`) and `E:` (enums).
   """
 
   @type t :: %__MODULE__{position: integer, operator: binary(), source: String.t()}
@@ -102,19 +106,22 @@ defmodule Dumbo.Decoder do
 
   @type opts :: Dumbo.DecodeOpts.t()
 
+  import Dumbo.Utils
+
   @compile {:inline,
             [
-              advance: 2,
-              boolean: 2,
-              deref_object: 1,
+              boolean: 3,
+              bytes: 4,
               dot_pattern: 0,
+              expect: 4,
               exponent_pattern: 0,
-              integer: 2,
+              integer: 3,
               key_context: 1,
               push: 4,
               reference_pattern: 0,
               reserve: 1,
-              resolve_slot: 3
+              resolve_slot: 3,
+              sized: 4
             ]}
 
   # `:binary.compile_pattern/1` returns a term containing a reference, which
@@ -137,15 +144,13 @@ defmodule Dumbo.Decoder do
 
   #   * `opts`     - the active `Dumbo.DecodeOpts`.
   #   * `source`   - the original binary, for error positions.
-  #   * `position` - absolute offset of the current `rest`.
   #   * `refs`     - PHP's `var_hash`: every parsed value, in push order but
-  #                  stored most-recent-first (see `value/2`).
+  #                  stored most-recent-first (see `value/3`).
   #   * `push?`    - `false` while decoding a key.
   #   * `slot`     - counter used to reserve container reference slots.
   Record.defrecordp(:context,
     opts: %Dumbo.DecodeOpts{},
     source: <<>>,
-    position: 0,
     refs: [],
     push?: true,
     slot: 0
@@ -230,10 +235,34 @@ defmodule Dumbo.Decoder do
   def decode(source, opts \\ %Dumbo.DecodeOpts{}) do
     opts = disable_unused_references(source, opts)
 
-    case value(source, context(opts: opts, source: source)) do
-      {value, _rest, _position, _context} -> value
+    try do
+      {value, _rest, _position, _context} = value(source, 0, context(opts: opts, source: source))
+      value
+    catch
+      :throw, {:decode_error, position, token} ->
+        raise Dumbo.DecodeError, source: source, position: position, token: token
+
+      :throw, {:reference_error, position, reason} ->
+        raise Dumbo.ReferenceError, message: reference_message(reason), position: position
+
+      :throw, {:unsupported_operator, position, operator} ->
+        raise Dumbo.UnsupportedOperatorError,
+          source: source,
+          position: position,
+          operator: operator
     end
   end
+
+  defp reference_message({:array_out_of_range, n}),
+    do: "Array reference #{inspect(n)} out of range"
+
+  defp reference_message(:recursive), do: "Recursive references are not supported"
+
+  defp reference_message({:object_out_of_range, n}),
+    do: "Object reference #{inspect(n)} out of range"
+
+  defp reference_message({:not_object, n}),
+    do: "Object reference #{inspect(n)} does not point to an object"
 
   # Reference resolution keeps a growing `refs` stack and scans it on every
   # container. If the payload cannot contain an `R:`/`r:` token at all, skip that
@@ -256,32 +285,48 @@ defmodule Dumbo.Decoder do
   # order. `push?` is `false` while decoding a key, matching PHP parsing keys
   # with a `NULL` var_hash. Object slots are tagged `{:object_ref, value}` so
   # `r:` can verify its target is an object.
-  defp value(rest, context(position: position) = context) do
+  defp value(rest, position, context) do
     case rest do
-      <<?N, ?;, rest::binary>> -> push(nil, rest, position + 2, context)
-      <<?b, ?:, rest::binary>> -> boolean(rest, advance(context, 2))
-      <<?i, ?:, rest::binary>> -> integer(rest, advance(context, 2))
-      <<?R, ?:, rest::binary>> -> reference(rest, advance(context, 2))
-      <<?r, ?:, rest::binary>> -> object_reference(rest, advance(context, 2))
-      <<?d, ?:, rest::binary>> -> float(rest, advance(context, 2))
-      <<?s, ?:, rest::binary>> -> string(rest, advance(context, 2))
-      <<?a, ?:, rest::binary>> -> array(rest, advance(context, 2))
-      <<?O, ?:, rest::binary>> -> object(rest, advance(context, 2))
-      <<?C, ?:, _::binary>> -> unsupported_operator("C:", position, context)
-      <<?E, ?:, _::binary>> -> unsupported_operator("E:", position, context)
-      _ -> fail(rest, context)
+      <<"N;", rest::binary>> ->
+        push(nil, rest, position + 2, context)
+
+      <<"b:", rest::binary>> ->
+        boolean(rest, position + 2, context)
+
+      <<"i:", rest::binary>> ->
+        integer(rest, position + 2, context)
+
+      <<"R:", rest::binary>> ->
+        reference(rest, position + 2, context)
+
+      <<"r:", rest::binary>> ->
+        object_reference(rest, position + 2, context)
+
+      <<"d:", rest::binary>> ->
+        float(rest, position + 2, context)
+
+      <<"s:", rest::binary>> ->
+        chain(rest, position + 2, context) do
+          size <- sized(?:), data <- bytes(size), _ <- expect(?;) ->
+            push(data, &rest, &position, &context)
+        end
+
+      <<"a:", rest::binary>> ->
+        array(rest, position + 2, context)
+
+      <<"O:", rest::binary>> ->
+        object(rest, position + 2, context)
+
+      <<"C:", _::binary>> ->
+        throw({:unsupported_operator, position, "C:"})
+
+      <<"E:", _::binary>> ->
+        throw({:unsupported_operator, position, "E:"})
+
+      _ ->
+        fail(rest, position, context)
     end
   end
-
-  defp unsupported_operator(operator, position, context(source: source)) do
-    raise Dumbo.UnsupportedOperatorError,
-      source: source,
-      position: position,
-      operator: operator
-  end
-
-  defp advance(context(position: position) = context, by),
-    do: context(context, position: position + by)
 
   # Appends to `refs` (most-recent-first), unless we are decoding a key or
   # reference resolution (and therefore the whole stack) is disabled.
@@ -339,27 +384,27 @@ defmodule Dumbo.Decoder do
     end
   end
 
-  defp boolean(rest, context(position: position) = context) do
+  defp boolean(rest, position, context) do
     case rest do
-      <<?0, ?;, rest::binary>> -> push(false, rest, position + 2, context)
-      <<?1, ?;, rest::binary>> -> push(true, rest, position + 2, context)
-      _ -> fail(rest, context)
+      <<"0;", rest::binary>> -> push(false, rest, position + 2, context)
+      <<"1;", rest::binary>> -> push(true, rest, position + 2, context)
+      _ -> fail(rest, position, context)
     end
   end
 
   defguardp is_digit(c) when c in ?0..?9
 
-  defp integer(rest, context) do
+  defp integer(rest, position, context) do
     case rest do
-      <<?-, rest::binary>> -> integer_digits(rest, advance(context, 1), -1)
-      _ -> integer_digits(rest, context, 1)
+      <<?-, rest::binary>> -> integer_digits(rest, position + 1, context, -1)
+      _ -> integer_digits(rest, position, context, 1)
     end
   end
 
-  defp integer_digits(rest, context(source: source, position: position) = context, sign) do
+  defp integer_digits(rest, position, context(source: source) = context, sign) do
     case take_digits(rest, 0) do
       {0, _rest} ->
-        fail(rest, context)
+        fail(rest, position, context)
 
       {count, <<?;, rest::binary>>} ->
         value =
@@ -371,7 +416,7 @@ defmodule Dumbo.Decoder do
         push(value, rest, position + count + 1, context)
 
       {count, _rest} ->
-        fail(rest, advance(context, count))
+        fail(rest, position + count, context)
     end
   end
 
@@ -385,47 +430,44 @@ defmodule Dumbo.Decoder do
     end
   end
 
-  defp float(rest, context(position: position) = context) do
+  defp float(rest, position, context) do
     case rest do
-      <<?I, ?N, ?F, ?;, rest::binary>> ->
+      <<"INF;", rest::binary>> ->
         push(:infinity, rest, position + 4, context)
 
-      <<?-, ?I, ?N, ?F, ?;, rest::binary>> ->
+      <<"-INF;", rest::binary>> ->
         push(:negative_infinity, rest, position + 5, context)
 
-      <<?N, ?A, ?N, ?;, rest::binary>> ->
+      <<"NAN;", rest::binary>> ->
         push(:nan, rest, position + 4, context)
 
       _ ->
-        numeric_float(rest, context)
+        numeric_float(rest, position, context)
     end
   end
 
   if Code.ensure_loaded?(Dumbo.Nif) do
     defp numeric_float(
            rest,
-           context(
-             opts: %Dumbo.DecodeOpts{use_native_decoders: true},
-             source: source,
-             position: position
-           ) = context
+           position,
+           context(opts: %Dumbo.DecodeOpts{use_native_decoders: true}) = context
          ) do
       case Dumbo.Nif.decode_numeric_float(rest) do
         {:ok, {value, count}} ->
           <<_::binary-size(^count), rest::binary>> = rest
-          push(value, rest, position + count, advance(context, count))
+          push(value, rest, position + count, context)
 
         {:error, {:unexpected_end, %{position: offset}}} ->
-          raise Dumbo.DecodeError, source: source, position: position + offset
+          throw({:decode_error, position + offset, nil})
 
         {:error, {:unexpected_sequence, %{position: offset, token: token}}} ->
-          raise Dumbo.DecodeError, source: source, position: position + offset, token: token
+          throw({:decode_error, position + offset, token})
       end
     end
   end
 
-  defp numeric_float(rest, context(position: position) = context) do
-    {token, rest, count} = float_token(rest, context, position, 0)
+  defp numeric_float(rest, position, context) do
+    {token, rest, count} = float_token(rest, position, context, 0)
 
     case normalize_float(token) do
       {:ok, normalized} ->
@@ -434,23 +476,20 @@ defmodule Dumbo.Decoder do
 
       :error ->
         # Match the NIF: report the whole invalid token at its start.
-        raise Dumbo.DecodeError,
-          source: context(context, :source),
-          position: position,
-          token: token
+        throw({:decode_error, position, token})
     end
   end
 
-  defp float_token(rest, context(source: source) = context, start, count) do
+  defp float_token(rest, start, context(source: source) = context, count) do
     case rest do
       <<?;, rest::binary>> ->
         {binary_part(source, start, count), rest, count}
 
       <<c, rest::binary>> when c in ~c"0123456789+-.eE" ->
-        float_token(rest, context, start, count + 1)
+        float_token(rest, start, context, count + 1)
 
       _ ->
-        fail(rest, advance(context, count))
+        fail(rest, start + count, context)
     end
   end
 
@@ -526,64 +565,56 @@ defmodule Dumbo.Decoder do
     end
   end
 
-  defp sized(rest, context(source: source, position: position) = context, suffix) do
+  defp sized(rest, position, context(source: source) = context, suffix) do
     {count, rest} = take_digits(rest, 0)
 
     case rest do
       <<^suffix, rest::binary>> when count > 0 ->
         size = :erlang.binary_to_integer(:binary.part(source, position, count))
-        {size, rest, position + count + 1}
+        {size, rest, position + count + 1, context}
 
       _ ->
-        fail(rest, advance(context, count))
+        fail(rest, position + count, context)
     end
   end
 
-  defp bytes(rest, context) do
-    {size, rest, position} = sized(rest, context, ?:)
-
+  defp bytes(rest, position, context, size) do
     case rest do
       <<?", data::binary-size(^size), ?", rest::binary>> ->
-        {data, rest, position + 1 + size + 1}
+        {data, rest, position + 1 + size + 1, context}
 
       _ ->
-        fail(rest, context)
+        fail(rest, position, context)
     end
   end
 
-  defp string(rest, context) do
-    {data, rest, position} = bytes(rest, context)
-
+  defp expect(rest, position, context, byte) do
     case rest do
-      <<?;, rest::binary>> -> push(data, rest, position + 1, context)
-      _ -> fail(rest, context)
+      <<^byte, rest::binary>> -> {byte, rest, position + 1, context}
+      _ -> fail(rest, position, context)
     end
   end
 
-  defp reference(
-         _rest,
-         context(
-           opts: %Dumbo.DecodeOpts{resolve_references: false},
-           source: source,
-           position: position
-         )
-       ) do
-    raise Dumbo.DecodeError, source: source, position: position - 2, token: "R:"
+  defp reference(_rest, position, context(opts: %Dumbo.DecodeOpts{resolve_references: false})) do
+    throw({:decode_error, position - 2, "R:"})
   end
 
-  defp reference(rest, context(refs: refs) = context) do
-    {n, rest, position} = reference_id(rest, context)
+  defp reference(rest, position, context(refs: refs) = context) do
+    start = position - 2
 
-    case fetch_reference(refs, n) do
-      :missing ->
-        raise Dumbo.ReferenceError, message: "Array reference #{inspect(n)} out of range"
-
-      {:slot, _slot} ->
-        raise Dumbo.ReferenceError, message: "Recursive references are not supported"
-
-      entry ->
+    chain(rest, position, context) do
+      n <- reference_id(), entry = reference_entry(refs, start, n), key_context() ->
         # A reference is not itself pushed: pass it through without growing refs.
-        {deref_object(entry), rest, position, context(context, push?: false)}
+        {entry, &rest, &position, &context}
+    end
+  end
+
+  defp reference_entry(refs, position, n) do
+    case fetch_reference(refs, n) do
+      :missing -> throw({:reference_error, position, {:array_out_of_range, n}})
+      {:slot, _slot} -> throw({:reference_error, position, :recursive})
+      {:object_ref, value} -> value
+      entry -> entry
     end
   end
 
@@ -591,152 +622,112 @@ defmodule Dumbo.Decoder do
   # itself pushed onto the stack. The target must be an object.
   defp object_reference(
          _rest,
-         context(
-           opts: %Dumbo.DecodeOpts{resolve_references: false},
-           source: source,
-           position: position
-         )
+         position,
+         context(opts: %Dumbo.DecodeOpts{resolve_references: false})
        ) do
-    raise Dumbo.DecodeError, source: source, position: position - 2, token: "r:"
+    throw({:decode_error, position - 2, "r:"})
   end
 
-  defp object_reference(rest, context(refs: refs) = context) do
-    {n, rest, position} = reference_id(rest, context)
+  defp object_reference(rest, position, context(refs: refs) = context) do
+    start = position - 2
 
+    chain(rest, position, context) do
+      n <- reference_id(), value = object_reference_value(refs, start, n) ->
+        push_object(value, &rest, &position, &context)
+    end
+  end
+
+  defp object_reference_value(refs, position, n) do
     case fetch_reference(refs, n) do
-      {:object_ref, value} ->
-        push_object(value, rest, position, context)
-
-      {:slot, _slot} ->
-        raise Dumbo.ReferenceError, message: "Recursive references are not supported"
-
-      :missing ->
-        raise Dumbo.ReferenceError, message: "Object reference #{inspect(n)} out of range"
-
-      _value ->
-        raise Dumbo.ReferenceError,
-          message: "Object reference #{inspect(n)} does not point to an object"
+      {:object_ref, value} -> value
+      {:slot, _slot} -> throw({:reference_error, position, :recursive})
+      :missing -> throw({:reference_error, position, {:object_out_of_range, n}})
+      _value -> throw({:reference_error, position, {:not_object, n}})
     end
   end
 
   # Object slots are stored tagged so `r:` can verify the target is an object;
   # `R:` unwraps them so callers never see the tag.
-  defp deref_object({:object_ref, value}), do: value
-  defp deref_object(entry), do: entry
-
   defp push_object(value, rest, position, context(push?: false) = context),
     do: {value, rest, position, context}
 
   defp push_object(value, rest, position, context(refs: refs) = context),
     do: {value, rest, position, context(context, refs: [{:object_ref, value} | refs])}
 
-  defp reference_id(rest, context(source: source, position: position) = context) do
+  defp reference_id(rest, position, context(source: source) = context) do
     case take_digits(rest, 0) do
       {0, _rest} ->
-        fail(rest, context)
+        fail(rest, position, context)
 
       {count, <<?;, rest::binary>>} ->
         n = :erlang.binary_to_integer(:binary.part(source, position, count))
-        {n, rest, position + count + 1}
+        {n, rest, position + count + 1, context}
 
       {count, _rest} ->
-        fail(rest, advance(context, count))
+        fail(rest, position + count, context)
     end
   end
 
-  defp array(rest, context) do
-    {size, rest, position} = sized(rest, context, ?:)
-
-    case rest do
-      <<?{, rest::binary>> ->
-        # Reserve the array's ref slot before decoding its children.
-        {slot, context} = reserve(context)
-
-        {entries, rest, position, context} =
-          array_entries(rest, context(context, position: position + 1), size)
-
-        case rest do
-          <<?}, rest::binary>> ->
-            value = Map.new(entries)
-            context = resolve_slot(context, slot, value)
-            {value, rest, position + 1, context}
-
-          _ ->
-            fail(rest, context(context, position: position))
-        end
-
-      _ ->
-        fail(rest, context)
+  defp array(rest, position, context) do
+    chain(rest, position, context) do
+      size <- sized(?:),
+      _ <- expect(?{),
+      slot
+      <~ reserve(),
+      entries <- array_entries(size),
+      _ <- expect(?}),
+      value = Map.new(entries),
+      resolve_slot(slot, value) ->
+        {value, &rest, &position, &context}
     end
   end
 
-  defp array_entries(rest, context, size) do
-    array_entries(rest, context, size, 0, [])
+  defp array_entries(rest, position, context, size) do
+    array_entries(rest, position, context, size, 0, [])
   end
 
-  defp array_entries(rest, context(position: position) = context, size, index, entries) do
+  defp array_entries(rest, position, context, size, index, entries) do
     if index == size do
       {:lists.reverse(entries), rest, position, context}
     else
-      {key, rest, position, context} = value(rest, key_context(context))
+      {key, rest, position, context} = value(rest, position, key_context(context))
 
       {entry, rest, position, context} =
-        value(rest, context(context, position: position, push?: true))
+        value(rest, position, context(context, push?: true))
 
-      array_entries(
-        rest,
-        context(context, position: position),
-        size,
-        index + 1,
-        [{key, entry} | entries]
-      )
+      array_entries(rest, position, context, size, index + 1, [{key, entry} | entries])
     end
   end
 
-  defp object(rest, context(opts: opts) = context) do
-    {name, rest, position} = bytes(rest, context)
-
-    case rest do
-      <<?:, rest::binary>> ->
-        {slot, context} = reserve(context)
-
-        {properties, rest, position, context} =
-          property_list(rest, context(context, position: position + 1))
-
-        value = resolve_object(name, properties, opts)
-        context = resolve_slot(context, slot, {:object_ref, value})
-        {value, rest, position, context}
-
-      _ ->
-        fail(rest, context)
+  defp object(rest, position, context(opts: opts) = context) do
+    chain(rest, position, context) do
+      size <- sized(?:),
+      name <- bytes(size),
+      _ <- expect(?:),
+      slot
+      <~ reserve(),
+      properties <- property_list(),
+      value = resolve_object(name, properties, opts),
+      resolve_slot(slot, {:object_ref, value}) ->
+        {value, &rest, &position, &context}
     end
   end
 
-  defp property_list(rest, context) do
-    {size, rest, position} = sized(rest, context, ?:)
-
-    case rest do
-      <<?{, rest::binary>> ->
-        {entries, rest, position, context} =
-          array_entries(rest, context(context, position: position + 1), size)
-
-        case rest do
-          <<?}, rest::binary>> -> {Map.new(entries), rest, position + 1, context}
-          _ -> fail(rest, context(context, position: position))
-        end
-
-      _ ->
-        fail(rest, context)
+  defp property_list(rest, position, context) do
+    chain(rest, position, context) do
+      size <- sized(?:),
+      _ <- expect(?{),
+      entries <- array_entries(size),
+      _ <- expect(?}),
+      value = Map.new(entries) ->
+        {value, &rest, &position, &context}
     end
   end
 
-  defp fail(rest, context(source: source, position: position)) do
+  defp fail(rest, position, _context) do
     case rest do
-      <<>> ->
-        raise Dumbo.DecodeError, source: source, position: position
-
-      <<byte, _::binary>> ->
-        raise Dumbo.DecodeError, source: source, position: position, token: <<byte>>
+      <<>> -> throw({:decode_error, position, nil})
+      <<byte, _::binary>> -> throw({:decode_error, position, <<byte>>})
     end
   end
 
