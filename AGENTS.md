@@ -49,6 +49,12 @@ format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
   `ArrayObject`/`ArrayIterator`, the `Spl*` list types), plus `Dumbo.ResolveError`.
   They are the default `:object_resolvers` of `Dumbo.DecodeOpts`; override by
   passing your own map. Named time zones need a configured time zone database.
+- `dumbo_nif` — an **optional** dependency (a precompiled Rustler NIF) that
+  reimplements numeric-float parsing. `Dumbo.Decoder` picks it up at compile time
+  behind `if Code.ensure_loaded?(Dumbo.Nif)` when `DecodeOpts.use_native_decoders`
+  is `true` (the default). Everything else stays pure Elixir, and the library
+  works without the dep. Benchmarks compare both paths (see
+  `bench/decode.exs`).
 
 ## Format gotchas
 

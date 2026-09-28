@@ -52,18 +52,17 @@ defmodule Dumbo.Bench do
   end
 
   @doc """
-  Loads every fixture matching the `:sizes` and `:only` options.
+  Loads every fixture matching the `:sizes` and `:only` options as a map of
+  fixture name to binary, suitable for Benchee's `:inputs` option.
 
-  Returns `{path, binary}` pairs sorted by path. A fixture's size is the final
-  `.`-separated token of its name (`users.small.ser`); fixtures without one are
-  always included.
+  A fixture's size is the final `.`-separated token of its name
+  (`users.small.ser`); fixtures without one are always included.
   """
   def fixtures(%{sizes: sizes, only: only}) do
     Path.wildcard("test/fixtures/**/*.ser")
     |> Enum.filter(fn path -> size_in?(path, sizes) end)
     |> Enum.filter(fn path -> only == nil or String.contains?(path, only) end)
-    |> Enum.map(fn path -> {Path.relative_to(path, "test/fixtures"), File.read!(path)} end)
-    |> Enum.sort()
+    |> Map.new(fn path -> {Path.relative_to(path, "test/fixtures"), File.read!(path)} end)
   end
 
   defp size_in?(path, sizes) do
@@ -74,17 +73,21 @@ defmodule Dumbo.Bench do
   end
 
   @doc """
-  Runs Benchee over `inputs` with the measurement options from `parse_args/1`,
-  printing the configured summary line first.
+  Runs Benchee over the `jobs` map (`%{name => function}`) against every entry
+  in `inputs` via Benchee's `:inputs` option, using the measurement options from
+  `parse_args/1`. Prints the summary line first.
+
+  `inputs` is a map of fixture name to value; Benchee groups the results by input
+  name.
   """
-  def run(title, inputs, %{format: format} = opts) do
+  def run(title, jobs, inputs, %{format: format} = opts) when is_map(jobs) do
     if format != "console" do
       abort("unsupported --format #{inspect(format)} (only \"console\")")
     end
 
     IO.puts("#{title}\n")
 
-    Benchee.run(inputs, benchee_config(opts))
+    Benchee.run(jobs, benchee_config(opts) ++ [inputs: inputs])
   end
 
   defp benchee_config(opts) do

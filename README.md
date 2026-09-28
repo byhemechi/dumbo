@@ -17,6 +17,32 @@ def deps do
 end
 ```
 
+### Native decoding (optional)
+
+Float-heavy payloads decode faster with the companion
+[`dumbo_nif`](https://hex.pm/packages/dumbo_nif) library, which reimplements
+Dumbo's numeric-float parsing as a precompiled Rust NIF:
+
+```elixir
+def deps do
+  [
+    {:dumbo, "~> 0.1.0"},
+    {:dumbo_nif, ">= 0.1.0", optional: true}
+  ]
+end
+```
+
+When `dumbo_nif` is installed, `Dumbo.decode/2` uses it automatically for
+numeric floats. Only that part of the decoder is native — everything else stays
+pure Elixir, and Dumbo works unchanged without the dependency. To force the
+pure-Elixir path (for example, to compare), pass:
+
+```elixir
+opts = %Dumbo.DecodeOpts{use_native_decoders: false}
+Dumbo.decode(~s'a:1:{i:0;d:1.5;}', opts)
+#=> %{0 => 1.5}
+```
+
 ## Usage
 
 ### Encoding

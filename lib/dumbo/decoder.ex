@@ -7,15 +7,23 @@ defmodule Dumbo.DecodeOpts do
     * `:object_resolvers` - A map of PHP class names to resolvers. Each resolver is
       a function of arity 1 or a module implementing `Dumbo.ObjectResolver`.
       Defaults to `Dumbo.PHP.resolvers()`.
+
+    * `:use_native_decoders` - When `true` (the default) and the optional
+      [`dumbo_nif`](https://hex.pm/packages/dumbo_nif) dependency is installed,
+      numeric floats are parsed by a precompiled Rust NIF instead of the
+      pure-Elixir decoder. Set to `false` to force the pure-Elixir path. Ignored
+      when `dumbo_nif` is not available.
   """
 
   @type object_resolver :: (object :: map() -> term()) | module()
 
   @type t :: %__MODULE__{
-          object_resolvers: %{(object_name :: binary()) => object_resolver()}
+          object_resolvers: %{(object_name :: binary()) => object_resolver()},
+          use_native_decoders: boolean()
         }
 
-  defstruct object_resolvers: Dumbo.PHP.resolvers()
+  defstruct object_resolvers: Dumbo.PHP.resolvers(),
+            use_native_decoders: true
 end
 
 defmodule Dumbo.DecodeError do
@@ -273,6 +281,28 @@ defmodule Dumbo.Decoder do
 
       _ ->
         numeric_float(rest, context)
+    end
+  end
+
+  if Code.ensure_loaded?(Dumbo.Nif) do
+    defp numeric_float(
+           rest,
+           context = %__MODULE__.Context{opts: %Dumbo.DecodeOpts{use_native_decoders: true}}
+         ) do
+      case Dumbo.Nif.decode_numeric_float(rest) do
+        {:ok, {value, count}} ->
+          <<_::binary-size(^count), rest::binary>> = rest
+          push(value, rest, context.position + count, advance(context, count))
+
+        {:error, {:unexpected_end, %{position: position}}} ->
+          raise Dumbo.DecodeError, source: context.source, position: context.position + position
+
+        {:error, {:unexpected_sequence, %{position: position, token: token}}} ->
+          raise Dumbo.DecodeError,
+            source: context.source,
+            position: context.position + position,
+            token: token
+      end
     end
   end
 

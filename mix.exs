@@ -40,7 +40,8 @@ defmodule Dumbo.MixProject do
   defp deps do
     [
       {:ex_doc, "~> 0.34", only: :dev, runtime: false, warn_if_outdated: true},
-      {:benchee, "~> 1.5", only: :dev}
+      {:benchee, "~> 1.5", only: :dev},
+      {:dumbo_nif, ">= 0.1.0", optional: true}
     ]
   end
 

@@ -1,7 +1,7 @@
 # Run with: mix run bench/encode.exs [options]
 #
-# Benchmarks encoding the terms decoded from the fixtures under `test/fixtures`,
-# grouped by payload and size. See `--help` for the available options.
+# Benchmarks encoding the terms decoded from the fixtures under `test/fixtures`.
+# See `--help` for the available options.
 #
 # Fixtures containing values the encoder cannot serialise (`{:object, name,
 # props}` tuples from unresolved PHP objects) are skipped.
@@ -37,7 +37,7 @@ inputs =
     term = Dumbo.decode(bin)
 
     if Dumbo.Bench.Encode.encodable?(term) do
-      Map.put(acc, name, fn -> Dumbo.encode(term) end)
+      Map.put(acc, name, term)
     else
       IO.puts("skipping #{name} (contains values the encoder cannot handle)")
       acc
@@ -48,4 +48,4 @@ summary =
   "Benchmarking encode of #{map_size(inputs)} fixtures " <>
     "(sizes: #{Enum.join(opts.sizes, ", ")}, only: #{opts.only || "all"})"
 
-Dumbo.Bench.run(summary, inputs, opts)
+Dumbo.Bench.run(summary, %{"encode" => &Dumbo.encode/1}, inputs, opts)
