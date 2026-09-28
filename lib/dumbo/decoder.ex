@@ -71,6 +71,30 @@ defmodule Dumbo.ReferenceError do
   defexception [:message]
 end
 
+defmodule Dumbo.UnsupportedOperatorError do
+  @moduledoc """
+  Raised when the payload uses a PHP serialisation operator that Dumbo does not
+  support.
+
+  The format defines operators beyond the ones this library decodes, such as
+  `C:` (objects implementing `Serializable`) and `E:` (enums).
+  """
+
+  @type t :: %__MODULE__{position: integer, operator: binary(), source: String.t()}
+
+  defexception [:position, :operator, :source]
+
+  @impl true
+  def message(%{position: position, operator: operator}) do
+    "unsupported operator at position #{position}: #{inspect(operator)}" <>
+      operator_name(operator)
+  end
+
+  defp operator_name("C:"), do: " (custom-serialised object)"
+  defp operator_name("E:"), do: " (enum)"
+  defp operator_name(_operator), do: ""
+end
+
 defmodule Dumbo.Decoder do
   @moduledoc """
   Decoder implementation for the PHP serialisation format.
@@ -243,8 +267,17 @@ defmodule Dumbo.Decoder do
       <<?s, ?:, rest::binary>> -> string(rest, advance(context, 2))
       <<?a, ?:, rest::binary>> -> array(rest, advance(context, 2))
       <<?O, ?:, rest::binary>> -> object(rest, advance(context, 2))
+      <<?C, ?:, _::binary>> -> unsupported_operator("C:", position, context)
+      <<?E, ?:, _::binary>> -> unsupported_operator("E:", position, context)
       _ -> fail(rest, context)
     end
+  end
+
+  defp unsupported_operator(operator, position, context(source: source)) do
+    raise Dumbo.UnsupportedOperatorError,
+      source: source,
+      position: position,
+      operator: operator
   end
 
   defp advance(context(position: position) = context, by),
