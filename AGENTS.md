@@ -10,9 +10,10 @@ format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
 - `mix test test/dumbo_test.exs:20` — single test (line number).
 - `mix format` / `mix format --check-formatted`.
 - `mix docs` — ExDoc (dev-only dep).
-- `MIX_ENV=test mix run bench/decode.exs [size...]` / `bench/encode.exs` —
-  Benchee benchmarks over `test/fixtures` (Benchee is a `:test`-only dep, so the
-  `MIX_ENV=test` is required). Sizes default to `small medium large`.
+- `mix run bench/decode.exs [options]` / `bench/encode.exs` — Benchee benchmarks
+  over `test/fixtures` (Benchee is a `:dev`-only dep). Options: `--size`,
+  `--only`, `--warmup`, `--time`, `--memory-time`, `--reduction-time`; see
+  `--help`. Shared logic lives in `bench/bench_helper.exs`.
 
 ## Testing quirks
 

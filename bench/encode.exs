@@ -1,19 +1,19 @@
-# Run with: MIX_ENV=test mix run bench/encode.exs
+# Run with: mix run bench/encode.exs [options]
 #
 # Benchmarks encoding the terms decoded from the fixtures under `test/fixtures`,
-# grouped by payload and size. Pass one or more sizes to narrow it down, e.g.
-# `MIX_ENV=test mix run bench/encode.exs small`.
+# grouped by payload and size. See `--help` for the available options.
 #
-# Note: the terms include resolved `DateTime` structs where fixtures use them,
-# and objects fall back to `{:object, name, props}` tuples, which the encoder
-# cannot serialise; those fixtures are skipped.
+# Fixtures containing values the encoder cannot serialise (`{:object, name,
+# props}` tuples from unresolved PHP objects) are skipped.
 
-sizes = System.argv()
-sizes = if sizes == [], do: ~w(small medium large), else: sizes
+Code.require_file("bench_helper.exs", __DIR__)
 
-# Objects decoded without a resolver become `{:object, name, props}` tuples, and
-# special float atoms only partly round-trip; skip fixtures that contain them.
-defmodule Bench do
+# Objects decoded without a resolver become `{:object, name, props}` tuples,
+# which the encoder cannot handle; `DateTime` structs are fine (the protocol
+# implements them).
+defmodule Dumbo.Bench.Encode do
+  @moduledoc false
+
   def encodable?(%DateTime{}), do: true
   def encodable?(term) when is_map(term), do: Enum.all?(term, &encodable?/1)
   def encodable?(term) when is_list(term), do: Enum.all?(term, &encodable?/1)
@@ -28,37 +28,24 @@ defmodule Bench do
   def encodable?(_term), do: true
 end
 
-fixtures =
-  Path.wildcard("test/fixtures/**/*.ser")
-  |> Enum.filter(fn path ->
-    case Path.basename(path, ".ser") |> String.split(".") do
-      [_name, size] -> size in sizes
-      [_name] -> true
-    end
-  end)
-  |> Enum.map(fn path ->
-    name = Path.relative_to(path, "test/fixtures")
-    term = path |> File.read!() |> Dumbo.decode()
+opts = Dumbo.Bench.parse_args(System.argv())
 
-    if Bench.encodable?(term) do
-      {name, term}
+inputs =
+  opts
+  |> Dumbo.Bench.fixtures()
+  |> Enum.reduce(%{}, fn {name, bin}, acc ->
+    term = Dumbo.decode(bin)
+
+    if Dumbo.Bench.Encode.encodable?(term) do
+      Map.put(acc, name, fn -> Dumbo.encode(term) end)
     else
       IO.puts("skipping #{name} (contains values the encoder cannot handle)")
-      nil
+      acc
     end
   end)
-  |> Enum.reject(&is_nil/1)
-  |> Enum.sort()
 
-IO.puts(
-  "Benchmarking encode of #{length(fixtures)} fixtures (sizes: #{Enum.join(sizes, ", ")})\n"
-)
+summary =
+  "Benchmarking encode of #{map_size(inputs)} fixtures " <>
+    "(sizes: #{Enum.join(opts.sizes, ", ")}, only: #{opts.only || "all"})"
 
-Benchee.run(
-  Map.new(fixtures, fn {name, term} -> {name, fn -> Dumbo.encode(term) end} end),
-  warmup: 1,
-  time: 3,
-  memory_time: 1,
-  reduction_time: 1,
-  formatters: [Benchee.Formatters.Console]
-)
+Dumbo.Bench.run(summary, inputs, opts)
