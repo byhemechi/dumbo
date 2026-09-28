@@ -57,5 +57,8 @@ format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
   integral floats, and scientific notation with a signed uppercase `E` (e.g.
   `d:1.0E+25;`) only when the decimal exponent falls outside `-4..16`. See
   `Dumbo.Encode.float/2`; the fixture round-trips depend on this.
-- `R:` array references are only resolved within arrays; recursive refs
-  (`R:1;` at the top level) raise `Dumbo.ReferenceError`.
+- `R:` references use PHP's global value stack: every parsed value occupies a
+  slot in push order (arrays and objects included, keys excluded, references
+  excluded), and `R:n` is a 1-based index into that order. Recursive references
+  (a container referencing itself) raise `Dumbo.ReferenceError`, since Elixir
+  terms cannot be cyclic. See `Dumbo.Decoder.Context`.

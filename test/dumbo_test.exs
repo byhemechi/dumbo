@@ -161,6 +161,58 @@ defmodule DumboTest do
     end
   end
 
+  describe "array references" do
+    test "resolves a reference to an earlier value like PHP" do
+      # Values are: P0, P1, P2, P3; R:2 targets the value two slots back.
+      assert Dumbo.decode(~s'a:5:{i:0;s:2:"P0";i:1;s:2:"P1";i:2;s:2:"P2";i:3;s:2:"P3";i:4;R:2;}') ==
+               %{0 => "P0", 1 => "P1", 2 => "P2", 3 => "P3", 4 => "P0"}
+
+      assert Dumbo.decode(~s'a:5:{i:0;s:2:"P0";i:1;s:2:"P1";i:2;s:2:"P2";i:3;s:2:"P3";i:4;R:5;}') ==
+               %{0 => "P0", 1 => "P1", 2 => "P2", 3 => "P3", 4 => "P3"}
+    end
+
+    test "counts arrays as a single slot in the reference stack" do
+      # nest is slot 3 (array, inner, x, y); R:2 targets the inner array.
+      assert Dumbo.decode(~s'a:2:{s:4:"nest";a:2:{i:0;s:1:"x";i:1;s:1:"y";}s:3:"ref";R:3;}') ==
+               %{"nest" => %{0 => "x", 1 => "y"}, "ref" => "x"}
+    end
+
+    test "references an outer value from a nested array" do
+      assert Dumbo.decode(
+               ~s'a:3:{i:0;s:1:"A";i:1;s:1:"B";s:4:"nest";a:2:{i:0;s:5:"inner";i:1;R:2;}}'
+             ) == %{0 => "A", 1 => "B", "nest" => %{0 => "inner", 1 => "A"}}
+    end
+
+    test "resolves references inside object properties" do
+      assert Dumbo.decode(
+               ~s'O:1:"C":3:{s:1:"a";a:3:{i:0;i:1;i:1;i:2;i:2;i:3;}s:1:"b";s:3:"bee";s:1:"c";R:2;}'
+             ) ==
+               {:object, "C",
+                %{
+                  "a" => %{0 => 1, 1 => 2, 2 => 3},
+                  "b" => "bee",
+                  "c" => %{0 => 1, 1 => 2, 2 => 3}
+                }}
+    end
+
+    test "resolves references to falsy values" do
+      assert Dumbo.decode(~s'a:3:{i:0;N;i:1;i:9;i:2;R:2;}') == %{0 => nil, 1 => 9, 2 => nil}
+      assert Dumbo.decode(~s'a:3:{i:0;b:0;i:1;i:9;i:2;R:2;}') == %{0 => false, 1 => 9, 2 => false}
+    end
+
+    test "raises for out-of-range references" do
+      assert_raise Dumbo.ReferenceError, fn ->
+        Dumbo.decode(~s'a:2:{i:0;i:1;i:1;R:9;}')
+      end
+    end
+
+    test "raises for recursive references" do
+      assert_raise Dumbo.ReferenceError, fn ->
+        Dumbo.decode(~s'a:1:{i:0;R:1;}')
+      end
+    end
+  end
+
   describe "float encoding" do
     test "matches PHP's serialize() formatting" do
       cases = [
