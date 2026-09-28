@@ -213,6 +213,23 @@ defmodule DumboTest do
     end
   end
 
+  describe "references disabled" do
+    test "decodes payloads without references" do
+      opts = %Dumbo.DecodeOpts{resolve_references: false}
+
+      assert Dumbo.decode(~s'a:3:{i:0;i:1;i:1;s:2:"hi";i:2;a:1:{i:0;b:1;}}', opts) ==
+               %{0 => 1, 1 => "hi", 2 => %{0 => true}}
+    end
+
+    test "raises Dumbo.DecodeError when a reference is encountered" do
+      opts = %Dumbo.DecodeOpts{resolve_references: false}
+
+      assert_raise Dumbo.DecodeError, fn ->
+        Dumbo.decode(~s'a:2:{i:0;i:1;i:1;R:2;}', opts)
+      end
+    end
+  end
+
   describe "float encoding" do
     test "matches PHP's serialize() formatting" do
       cases = [

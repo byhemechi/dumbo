@@ -13,17 +13,25 @@ defmodule Dumbo.DecodeOpts do
       numeric floats are parsed by a precompiled Rust NIF instead of the
       pure-Elixir decoder. Set to `false` to force the pure-Elixir path. Ignored
       when `dumbo_nif` is not available.
+
+    * `:resolve_references` - When `true` (the default), `R:` references are
+      resolved against PHP's value stack. Set to `false` to reject them: the
+      decoder then does not build the stack at all, and encountering a reference
+      raises `Dumbo.DecodeError`. Use this when the input is known to be free of
+      references and the stack overhead should be avoided.
   """
 
   @type object_resolver :: (object :: map() -> term()) | module()
 
   @type t :: %__MODULE__{
           object_resolvers: %{(object_name :: binary()) => object_resolver()},
-          use_native_decoders: boolean()
+          use_native_decoders: boolean(),
+          resolve_references: boolean()
         }
 
   defstruct object_resolvers: Dumbo.PHP.resolvers(),
-            use_native_decoders: true
+            use_native_decoders: true,
+            resolve_references: true
 end
 
 defmodule Dumbo.DecodeError do
@@ -183,7 +191,11 @@ defmodule Dumbo.Decoder do
 
   defp advance(context, by), do: %{context | position: context.position + by}
 
-  # Appends to `refs` (most-recent-first), unless we are decoding a key.
+  # Appends to `refs` (most-recent-first), unless we are decoding a key or
+  # reference resolution (and therefore the whole stack) is disabled.
+  defp push(value, rest, position, %{opts: %{resolve_references: false}} = context),
+    do: {value, rest, position, context}
+
   defp push(value, rest, position, %{push?: false} = context),
     do: {value, rest, position, context}
 
@@ -193,11 +205,16 @@ defmodule Dumbo.Decoder do
   defp key_context(context), do: %{context | push?: false}
 
   # Reserves a reference slot for a container before its children are decoded,
-  # mirroring PHP pushing arrays and objects ahead of their contents.
+  # mirroring PHP pushing arrays and objects ahead of their contents. Nothing is
+  # reserved when reference resolution is disabled.
+  defp reserve(%{opts: %{resolve_references: false}} = context), do: {nil, context}
+
   defp reserve(context) do
     slot = context.slot
     {slot, %{context | refs: [{:slot, slot} | context.refs], slot: slot + 1}}
   end
+
+  defp resolve_slot(%{opts: %{resolve_references: false}} = context, _slot, _value), do: context
 
   defp resolve_slot(context, slot, value) do
     refs = replace_slot(context.refs, slot, value)
@@ -393,6 +410,13 @@ defmodule Dumbo.Decoder do
       <<?;, rest::binary>> -> push(data, rest, position + 1, context)
       _ -> fail(rest, context)
     end
+  end
+
+  defp reference(_rest, %{opts: %{resolve_references: false}} = context) do
+    raise Dumbo.DecodeError,
+      source: context.source,
+      position: context.position - 2,
+      token: "R:"
   end
 
   defp reference(rest, context) do

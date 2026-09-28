@@ -43,6 +43,19 @@ Dumbo.decode(~s'a:1:{i:0;d:1.5;}', opts)
 #=> %{0 => 1.5}
 ```
 
+### Disabling references (optional)
+
+PHP's `R:` references are resolved by default. If the input is known to be free
+of them, disable resolution to skip building the value stack:
+
+```elixir
+opts = %Dumbo.DecodeOpts{resolve_references: false}
+Dumbo.decode(~s'a:2:{i:0;i:1;i:1;i:2;}', opts)
+#=> %{0 => 1, 1 => 2}
+```
+
+Any `R:` reference then raises `Dumbo.DecodeError`.
+
 ## Usage
 
 ### Encoding

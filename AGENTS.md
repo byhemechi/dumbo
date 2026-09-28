@@ -71,4 +71,6 @@ format. No umbrella, no credo/dialyzer — only `mix` tooling. GitHub Actions CI
   slot in push order (arrays and objects included, keys excluded, references
   excluded), and `R:n` is a 1-based index into that order. Recursive references
   (a container referencing itself) raise `Dumbo.ReferenceError`, since Elixir
-  terms cannot be cyclic. See `Dumbo.Decoder.Context`.
+  terms cannot be cyclic. See `Dumbo.Decoder.Context`. Setting
+  `DecodeOpts.resolve_references` to `false` skips the stack entirely and
+  raises `Dumbo.DecodeError` on any reference.
