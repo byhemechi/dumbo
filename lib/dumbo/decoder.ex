@@ -8,17 +8,13 @@ defmodule Dumbo.DecodeOpts do
       a function of arity 1 or a module implementing `Dumbo.ObjectResolver`.
       Defaults to `Dumbo.PHP.resolvers()`.
 
-    * `:use_native_decoders` - When `true` (the default) and the optional
-      [`dumbo_nif`](https://hex.pm/packages/dumbo_nif) dependency is installed,
-      numeric floats are parsed by a precompiled Rust NIF instead of the
-      pure-Elixir decoder. Set to `false` to force the pure-Elixir path. Ignored
-      when `dumbo_nif` is not available.
+    * `:use_native_decoders` - When `true` (the default) and `dumbo_nif` is
+      installed, numeric floats are parsed by that precompiled NIF. Set to
+      `false` for the pure-Elixir path. Ignored without `dumbo_nif`.
 
-    * `:resolve_references` - When `true` (the default), `R:` references are
-      resolved against PHP's value stack. Set to `false` to reject them: the
-      decoder then does not build the stack at all, and encountering a reference
-      raises `Dumbo.DecodeError`. Use this when the input is known to be free of
-      references and the stack overhead should be avoided.
+    * `:resolve_references` - When `true` (the default), `R:`/`r:` references are
+      resolved. When `false`, the value stack is not built and any reference
+      raises `Dumbo.DecodeError`.
   """
 
   @type object_resolver :: (object :: map() -> term()) | module()
@@ -68,9 +64,8 @@ end
 
 defmodule Dumbo.ReferenceError do
   @moduledoc """
-  Exception raised when a reference (`R:n`) cannot be resolved, either because it
-  is out of range or because it is recursive (PHP allows cyclic data, Elixir
-  terms cannot).
+  Raised when a reference cannot be resolved: out of range, not an object
+  (`r:`), or recursive. PHP allows cyclic data; Elixir terms cannot.
   """
 
   defexception [:message]
@@ -129,11 +124,14 @@ defmodule Dumbo.Decoder do
       iex> Dumbo.Decoder.decode(~s'O:8:"stdClass":2:{s:4:"John";d:3.14;s:4:"Jane";d:2.718;}')
       %{"John" => 3.14, "Jane" => 2.718}
 
-  References are resolved as PHP resolves them, using a stack of every value
-  pushed while decoding (arrays and objects included, keys excluded):
+  `R:` value references and `r:` object references resolve against a stack of
+  every value seen so far (keys excluded):
 
       iex> Dumbo.Decoder.decode(~s'a:4:{i:0;i:10;i:1;i:20;i:2;i:30;i:3;R:2;}')
       %{0 => 10, 1 => 20, 2 => 30, 3 => 10}
+
+      iex> Dumbo.Decoder.decode(~s'a:2:{i:0;O:8:"stdClass":1:{s:1:"x";i:1;}i:1;r:2;}')
+      %{0 => %{"x" => 1}, 1 => %{"x" => 1}}
 
   Common PHP classes are resolved into native Elixir types automatically. Supply
   an empty `:object_resolvers` map to receive raw objects instead:
@@ -172,15 +170,18 @@ defmodule Dumbo.Decoder do
   # Returns `{value, rest, position, context}`.
   #
   # `refs` mirrors PHP's `var_hash`: every parsed value occupies a slot in push
-  # order (arrays and objects included, keys excluded, `R:` references excluded),
-  # and `R:n` is a 1-based index into that order. `push?` is `false` while
-  # decoding a key, matching PHP parsing keys with a `NULL` var_hash.
+  # order (arrays, objects, and their contained values included; keys and `R:`
+  # excluded; `r:` included), and `R:n`/`r:n` are 1-based indices into that
+  # order. `push?` is `false` while decoding a key, matching PHP parsing keys
+  # with a `NULL` var_hash. Object slots are tagged `{:object_ref, value}` so
+  # `r:` can verify its target is an object.
   defp value(rest, context) do
     case rest do
       <<?N, ?;, rest::binary>> -> push(nil, rest, context.position + 2, context)
       <<?b, ?:, rest::binary>> -> boolean(rest, advance(context, 2))
       <<?i, ?:, rest::binary>> -> integer(rest, advance(context, 2))
       <<?R, ?:, rest::binary>> -> reference(rest, advance(context, 2))
+      <<?r, ?:, rest::binary>> -> object_reference(rest, advance(context, 2))
       <<?d, ?:, rest::binary>> -> float(rest, advance(context, 2))
       <<?s, ?:, rest::binary>> -> string(rest, advance(context, 2))
       <<?a, ?:, rest::binary>> -> array(rest, advance(context, 2))
@@ -429,11 +430,50 @@ defmodule Dumbo.Decoder do
       {:slot, _slot} ->
         raise Dumbo.ReferenceError, message: "Recursive references are not supported"
 
-      value ->
+      entry ->
         # A reference is not itself pushed: pass it through without growing refs.
-        {value, rest, position, %{context | push?: false}}
+        {deref_object(entry), rest, position, %{context | push?: false}}
     end
   end
+
+  # A lowercase `r:` clones an object (same instance) and, unlike `R:`, is
+  # itself pushed onto the stack. The target must be an object.
+  defp object_reference(_rest, %{opts: %{resolve_references: false}} = context) do
+    raise Dumbo.DecodeError,
+      source: context.source,
+      position: context.position - 2,
+      token: "r:"
+  end
+
+  defp object_reference(rest, context) do
+    {n, rest, position} = reference_id(rest, context)
+
+    case fetch_reference(context.refs, n) do
+      {:object_ref, value} ->
+        push_object(value, rest, position, context)
+
+      {:slot, _slot} ->
+        raise Dumbo.ReferenceError, message: "Recursive references are not supported"
+
+      :missing ->
+        raise Dumbo.ReferenceError, message: "Object reference #{inspect(n)} out of range"
+
+      _value ->
+        raise Dumbo.ReferenceError,
+          message: "Object reference #{inspect(n)} does not point to an object"
+    end
+  end
+
+  # Object slots are stored tagged so `r:` can verify the target is an object;
+  # `R:` unwraps them so callers never see the tag.
+  defp deref_object({:object_ref, value}), do: value
+  defp deref_object(entry), do: entry
+
+  defp push_object(value, rest, position, %{push?: false} = context),
+    do: {value, rest, position, context}
+
+  defp push_object(value, rest, position, context),
+    do: {value, rest, position, %{context | refs: [{:object_ref, value} | context.refs]}}
 
   defp reference_id(rest, context) do
     case take_digits(rest, 0) do
@@ -507,7 +547,7 @@ defmodule Dumbo.Decoder do
           property_list(rest, %{context | position: position + 1})
 
         value = resolve_object(name, properties, context.opts)
-        context = resolve_slot(context, slot, value)
+        context = resolve_slot(context, slot, {:object_ref, value})
         {value, rest, position, context}
 
       _ ->

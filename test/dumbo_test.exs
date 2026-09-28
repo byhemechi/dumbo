@@ -213,6 +213,53 @@ defmodule DumboTest do
     end
   end
 
+  describe "object references" do
+    test "resolves a duplicated object with a lowercase r reference" do
+      # Both entries are the same object instance in PHP; Elixir yields equal
+      # (immutable) terms.
+      assert Dumbo.decode(~s'a:2:{i:0;O:1:"A":2:{s:1:"x";i:1;s:1:"y";i:2;}i:1;r:2;}') ==
+               %{
+                 0 => {:object, "A", %{"x" => 1, "y" => 2}},
+                 1 => {:object, "A", %{"x" => 1, "y" => 2}}
+               }
+    end
+
+    test "counts r references in the value stack like PHP" do
+      # PHP: a:4:{i:0;O(A,id=1);i:1;r:2;i:2;O(A,id=2);i:3;r:5;}
+      assert Dumbo.decode(
+               ~s'a:4:{i:0;O:1:"A":1:{s:2:"id";i:1;}i:1;r:2;i:2;O:1:"A":1:{s:2:"id";i:2;}i:3;r:5;}'
+             ) == %{
+               0 => {:object, "A", %{"id" => 1}},
+               1 => {:object, "A", %{"id" => 1}},
+               2 => {:object, "A", %{"id" => 2}},
+               3 => {:object, "A", %{"id" => 2}}
+             }
+    end
+
+    test "references an object nested inside another object" do
+      assert Dumbo.decode(
+               ~s'O:1:"C":2:{s:1:"a";O:1:"C":2:{s:1:"a";a:2:{i:0;i:1;i:1;i:2;}s:1:"b";R:3;}s:1:"b";r:2;}'
+             ) ==
+               {:object, "C",
+                %{
+                  "a" => {:object, "C", %{"a" => %{0 => 1, 1 => 2}, "b" => %{0 => 1, 1 => 2}}},
+                  "b" => {:object, "C", %{"a" => %{0 => 1, 1 => 2}, "b" => %{0 => 1, 1 => 2}}}
+                }}
+    end
+
+    test "raises when the target is not an object" do
+      assert_raise Dumbo.ReferenceError, fn ->
+        Dumbo.decode(~s'a:2:{i:0;a:1:{i:0;i:1;}i:1;r:2;}')
+      end
+    end
+
+    test "raises for out-of-range object references" do
+      assert_raise Dumbo.ReferenceError, fn ->
+        Dumbo.decode(~s'a:1:{i:0;r:5;}')
+      end
+    end
+  end
+
   describe "references disabled" do
     test "decodes payloads without references" do
       opts = %Dumbo.DecodeOpts{resolve_references: false}
@@ -226,6 +273,10 @@ defmodule DumboTest do
 
       assert_raise Dumbo.DecodeError, fn ->
         Dumbo.decode(~s'a:2:{i:0;i:1;i:1;R:2;}', opts)
+      end
+
+      assert_raise Dumbo.DecodeError, fn ->
+        Dumbo.decode(~s'a:2:{i:0;O:1:"A":1:{s:1:"x";i:1;}i:1;r:2;}', opts)
       end
     end
   end

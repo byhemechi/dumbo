@@ -5,11 +5,8 @@ defmodule Dumbo do
   Dumbo allows you to serialise Elixir data structures into PHP's serialisation format
   and deserialise PHP serialised strings back into Elixir terms.
 
-  Numeric-float decoding can optionally be offloaded to the companion
-  [`dumbo_nif`](https://hex.pm/packages/dumbo_nif) library, a precompiled Rust
-  NIF. Add it as a dependency to speed up float-heavy payloads; see
-  `Dumbo.DecodeOpts` for the `:use_native_decoders` option. Dumbo works without
-  it.
+  Numeric-float decoding can optionally be offloaded to
+  [`dumbo_nif`](https://hex.pm/packages/dumbo_nif); see `Dumbo.DecodeOpts`.
   """
 
   @doc """

@@ -45,8 +45,9 @@ Dumbo.decode(~s'a:1:{i:0;d:1.5;}', opts)
 
 ### Disabling references (optional)
 
-PHP's `R:` references are resolved by default. If the input is known to be free
-of them, disable resolution to skip building the value stack:
+PHP's `R:` value references and `r:` object references are resolved by default.
+If the input is known to be free of them, disable resolution to skip building
+the value stack:
 
 ```elixir
 opts = %Dumbo.DecodeOpts{resolve_references: false}
@@ -54,7 +55,7 @@ Dumbo.decode(~s'a:2:{i:0;i:1;i:1;i:2;}', opts)
 #=> %{0 => 1, 1 => 2}
 ```
 
-Any `R:` reference then raises `Dumbo.DecodeError`.
+Any reference then raises `Dumbo.DecodeError`.
 
 ## Usage
 
@@ -149,6 +150,21 @@ opts = %Dumbo.DecodeOpts{
 Dumbo.decode(~s'O:8:"stdClass":1:{s:4:"name";s:5:"Alice";}', opts)
 #=> %{"name" => "Alice"} (handled by the explicit resolver, not the built-in one)
 ```
+
+PHP's reference forms are resolved against a stack of every value seen so far:
+
+```elixir
+# R:n — a value reference
+Dumbo.decode(~s'a:4:{i:0;i:10;i:1;i:20;i:2;i:30;i:3;R:2;}')
+#=> %{0 => 10, 1 => 20, 2 => 30, 3 => 10}
+
+# r:n — an object reference (the same object instance appears again)
+Dumbo.decode(~s'a:2:{i:0;O:8:"stdClass":1:{s:1:"x";i:1;}i:1;r:2;}')
+#=> %{0 => %{"x" => 1}, 1 => %{"x" => 1}}
+```
+
+See [Disabling references](#disabling-references-optional) if the input is known
+to be free of them.
 
 ### Built-in resolvers
 
